@@ -19,12 +19,12 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v3.2.0
 
-      - name: Install SDK components
+      - name: Accept licenses and install SDK
         run: |
-          sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
-          yes | sdkmanager --licenses || true
+          echo "y" | sdkmanager --licenses || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
