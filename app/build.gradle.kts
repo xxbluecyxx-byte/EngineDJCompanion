@@ -1,11 +1,11 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.plugin.compose") }
 android {
     namespace = "de.enginecompanion"
-    compileSdk = 37
+    compileSdk = 36
     defaultConfig {
         applicationId = "de.enginecompanion"
         minSdk = 28
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 6
         versionName = "0.3.1-readonly"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -15,8 +15,8 @@ android {
     testOptions { unitTests.isIncludeAndroidResources = true }
 }
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation(platform("androidx.compose:compose-bom:2025.10.00"))
+    implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
