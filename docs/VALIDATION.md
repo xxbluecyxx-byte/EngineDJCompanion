@@ -1,0 +1,46 @@
+# Validierung — 7. November 2026
+
+Ausgelieferte Version: `0.3.0-readonly` (Version Code 5).
+
+```
+./gradlew clean assembleDebug testDebugUnitTest lintDebug
+```
+
+- Clean-Build: erfolgreich.
+- JUnit/Robolectric: 26 Tests, 0 Fehler, 0 Fehlschläge, 0 übersprungen.
+- Darunter vier EngineX-Clienttests für Adressvalidierung, Laufwerksantwort, Snapshot-Parsing und native Playlist-Reihenfolge.
+- Android Lint: 0 Fehler, 7 Warnungen (optionale neuere Testabhängigkeit, konservative Speicherplatzprüfung und optionale KTX-Schreibweisen).
+- APK: `apksigner verify` erfolgreich, APK Signature Scheme v2, ein Android-Debug-Signer.
+- Werkzeugstand: JDK 17, Gradle 9.5.0, AGP 9.3.0, Android API 37, Build Tools 36.0.0.
+
+## Änderung 0.2.0
+
+EngineX kann über die vorhandene authentifizierte LAN-API erkannt werden. Host und Zugriffscode werden nicht in Klartext zusammen gespeichert; der Zugriffscode wird mit einem nicht exportierbaren AES-GCM-Schlüssel im Android Keystore verschlüsselt. Eine vom Companion-Endpunkt geladene Bibliothek wird atomar im privaten App-Speicher abgelegt und bleibt offline durchsuchbar.
+
+Der passende EngineX-5.3.0.2-Endpunkt wurde als eng begrenzte, nur lesende Erweiterung gebaut. Er akzeptiert nur erkannte Datenträger, öffnet SQLite mit `mode=ro` und `query_only`, unterstützt ausschließlich das bestätigte Schema 3.0.2 und gibt keine Audiodateipfade aus. Der gezielte Go-Test besteht. Die vollständige EngineX-WebUI-Suite ist im Build-Container nicht vollständig grün, weil zwei bestehende Pro-DJ-Link-Tests Netlink beziehungsweise echte Mounts voraussetzen.
+
+## Änderung 0.2.1
+
+Playlist-Zuordnungen aus der WLAN-Momentaufnahme werden wie beim validierten USB-Adapter anhand von `listId`, `trackId` und `nextEntityId` aufgelöst. Eine abweichende Herkunfts-UUID verwirft den Eintrag nicht mehr. Die Playlistliste zeigt Trackzahlen und Elternnamen. USB- und EngineX-Verbindungsoptionen sind standardmäßig eingeklappt und über **Einstellungen** erreichbar.
+
+## Änderung 0.3.1
+
+Playlist-Baum: Aufklappzustand wird über Prozessneustarts gespeichert. Ordner und echte Playlists sind visuell deutlicher getrennt (Farbe, Symbol, Schriftstärke). Playlist-Suche filtert Titel und hält Eltern sichtbar. Für EngineX-Momentaufnahmen werden Trackzahlen von Ordnern rekursiv zusammengezählt. Ordner mit eigenen Tracks bieten einen expliziten „Öffnen“-Button.
+
+## Änderung 0.3.0
+
+Playlists werden als aufklappbarer Baum aus `parentListId` dargestellt; Geschwister folgen der tatsächlichen `nextListId`-Kette. Drei zusätzliche Unit-Tests prüfen eingeklappte und ausgeklappte Bäume sowie den sicheren Fallback bei ungültigen Ketten. Trackzeilen sind kompakter. Die WLAN-Detailansicht zeigt Dauer, übersetzte Tonart, Bewertung und alle Playlists, in denen der Track vorkommt.
+
+## Bereits bestätigter Gerätestand
+
+Der bisherige USB-Build wurde auf ASUS ROG Phone 9 Pro und Prime 4+ praktisch geprüft. Android erkennt den USB-Speicher; nach SAF-Freigabe zeigt die App reale Tracks und Playlists. Die neue WLAN-Version und das EngineX-Binary wurden noch nicht auf den Geräten installiert.
+
+## Änderung 0.1.1
+
+Die App beobachtet während ihrer Laufzeit USB-Geräte und erkennt Massenspeicher sowohl über die Geräteklasse als auch über Interfaces zusammengesetzter USB-Geräte. Beim Zurückkehren in die App wird erneut geprüft. Die Anzeige trennt jetzt drei Zustände: USB-Massenspeicher erkannt, SAF-Ordnerfreigabe vorhanden und Datenbank importiert. Bei erkanntem Speicher führt **USB-Ordner freigeben** direkt zum Android-Ordnerdialog. **Freigabe prüfen** ist erst nach einer gespeicherten Auswahl aktiv.
+
+Die USB-Erkennung gewährt keinen Dateizugriff und öffnet keine Linux-Pfade. Der Zugriff bleibt vollständig über Android SAF und ausschließlich lesend. Ein generischer USB-SATA-Adapter kann nur als USB-Massenspeicher, nicht sicher als Prime 4+, identifiziert werden.
+
+## Noch nicht geprüft
+
+EngineX-Companion-Endpunkt und WLAN-Download müssen noch auf dem Prime 4+ beziehungsweise dem ASUS praktisch geprüft werden. Unbekannte Datenbankschemata werden nur diagnostiziert. Cues, Loops, Beatgrids und Waveforms werden weiterhin nicht dekodiert; Bearbeitung und bidirektionale Synchronisierung sind nicht implementiert.

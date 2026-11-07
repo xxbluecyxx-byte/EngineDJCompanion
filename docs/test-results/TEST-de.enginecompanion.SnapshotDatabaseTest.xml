@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="de.enginecompanion.SnapshotDatabaseTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-10-28T09:21:51.724Z" hostname="acaa638ac8eb" time="0.108">
+  <properties/>
+  <testcase name="walIsRecoveredOnlyInPrivateWorkingCopy" classname="de.enginecompanion.SnapshotDatabaseTest" time="0.104"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,88 @@
+/workspace/scratch/0084fe941c74/EngineDJCompanion/app/src/main/java/de/enginecompanion/storage/SnapshotImporter.kt:54: Warning: Consider also using StorageManager#getAllocatableBytes and allocateBytes which will consider clearable cached data [UsableSpace]
+                    if (stage.usableSpace < 64L * 1024 * 1024) throw ImportFailure("Zu wenig interner Speicher.")
+                              ~~~~~~~~~~~
+
+   Explanation for issues of type "UsableSpace":
+   When you need to allocate disk space for large files, consider using the
+   new allocateBytes(FileDescriptor, long) API, which will automatically clear
+   cached files belonging to other apps (as needed) to meet your request.
+
+   When deciding if the device has enough disk space to hold your new data,
+   call getAllocatableBytes(UUID) instead of using getUsableSpace(), since the
+   former will consider any cached data that the system is willing to clear on
+   your behalf.
+
+   Note that these methods require API level 26. If your app is running on
+   older devices, you will probably need to use both APIs, conditionally
+   switching on Build.VERSION.SDK_INT. Lint only looks in the same compilation
+   unit to see if you are already using both APIs, so if it warns even though
+   you are already using the new API, consider moving the calls to the same
+   file or suppressing the warning.
+
+/workspace/scratch/0084fe941c74/EngineDJCompanion/app/src/main/java/de/enginecompanion/ui/ExplorerViewModel.kt:69: Warning: Use the KTX extension function SharedPreferences.edit instead? [UseKtx]
+                preferences.edit().putString("uri", uri.toString()).apply()
+                ~~~~~~~~~~~~~~~~~~
+/workspace/scratch/0084fe941c74/EngineDJCompanion/app/src/main/java/de/enginecompanion/ui/ExplorerViewModel.kt:96: Warning: Use the KTX extension function String.toUri instead? [UseKtx]
+        val readable = withContext(Dispatchers.IO) { runCatching { uri != null && DocumentFile.fromTreeUri(getApplication(), Uri.parse(uri))?.canRead() == true }.getOrDefault(false) }
+                                                                                                                             ~~~~~~~~~~~~~~
+/workspace/scratch/0084fe941c74/EngineDJCompanion/app/src/main/java/de/enginecompanion/data/LibraryRepository.kt:25: Warning: Use the KTX extension function SharedPreferences.edit instead? [UseKtx]
+        check(preferences.edit().putString("snapshot", library.directory.name).commit()) { "Import konnte nicht aktiviert werden." }
+              ~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "UseKtx":
+   The Android KTX libraries decorates the Android platform SDK as well as
+   various libraries with more convenient extension functions available from
+   Kotlin, allowing you to use default parameters, named parameters, and
+   more.
+
+   Available options:
+
+   **remove-defaults** (default is true):
+   Whether to skip arguments that match the defaults provided by the extension.
+
+   Extensions often provide default values for some of the parameters. For example:
+   ```kotlin
+   fun Path.readLines(charset: Charset = Charsets.UTF_8): List<String> { return Files.readAllLines(this, charset) }
+   ```
+   This lint check will by default automatically omit parameters that match the default, so if your code was calling
+
+   ```kotlin
+   Files.readAllLines(file, Charset.UTF_8)
+   ```
+   lint would replace this with
+   ```kotlin
+   file.readLines()
+   ```
+   rather than
+
+   ```kotlin
+   file.readLines(Charset.UTF_8
+   ```
+   You can turn this behavior off using this option.
+
+   To configure this option, use a `lint.xml` file with an <option> like this:
+
+   ```xml
+   <lint>
+       <issue id="UseKtx">
+           <option name="remove-defaults" value="true" />
+       </issue>
+   </lint>
+   ```
+
+   **require-present** (default is true):
+   Whether to only offer extensions already available.
+
+   This option lets you only have lint suggest extension replacements if those extensions are already available on the class path (in other words, you're already depending on the library containing the extension method.)
+
+   To configure this option, use a `lint.xml` file with an <option> like this:
+
+   ```xml
+   <lint>
+       <issue id="UseKtx">
+           <option name="require-present" value="true" />
+       </issue>
+   </lint>
+   ```
+
+0 errors, 4 warnings

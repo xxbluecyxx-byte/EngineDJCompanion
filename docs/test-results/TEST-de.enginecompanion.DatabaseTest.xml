@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="de.enginecompanion.DatabaseTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-10-28T09:21:31.106Z" hostname="acaa638ac8eb" time="20.593">
+  <properties/>
+  <testcase name="membershipUsesStoredTrackId" classname="de.enginecompanion.DatabaseTest" time="3.983"/>
+  <testcase name="queryOnlyPreventsAccidentalMutation" classname="de.enginecompanion.DatabaseTest" time="0.048"/>
+  <testcase name="introspectsActualColumnsAndForeignKeys" classname="de.enginecompanion.DatabaseTest" time="0.068"/>
+  <testcase name="missingOptionalColumnDoesNotCrash" classname="de.enginecompanion.DatabaseTest" time="0.038"/>
+  <testcase name="searchTreatsPercentAndUnderscoreLiterally" classname="de.enginecompanion.DatabaseTest" time="0.064"/>
+  <testcase name="missingRequiredColumnRejectsAdapter" classname="de.enginecompanion.DatabaseTest" time="0.043"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="de.enginecompanion.PlaylistOrderTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-10-28T09:21:51.706Z" hostname="acaa638ac8eb" time="0.006">
+  <properties/>
+  <testcase name="detectsCycles" classname="de.enginecompanion.PlaylistOrderTest" time="0.002"/>
+  <testcase name="followsLinksInsteadOfRowOrder" classname="de.enginecompanion.PlaylistOrderTest" time="0.001"/>
+  <testcase name="detectsMultipleHeads" classname="de.enginecompanion.PlaylistOrderTest" time="0.0"/>
+  <testcase name="emptyPlaylistIsValid" classname="de.enginecompanion.PlaylistOrderTest" time="0.0"/>
+  <testcase name="foreignAndUnknownDatabaseIdsAreNotJoinedLocally" classname="de.enginecompanion.PlaylistOrderTest" time="0.001"/>
+  <testcase name="unknownVersionsAreNotGuessed" classname="de.enginecompanion.PlaylistOrderTest" time="0.002"/>
+  <testcase name="detectsDanglingPointer" classname="de.enginecompanion.PlaylistOrderTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
