@@ -1,11 +1,11 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.plugin.compose") }
 android {
     namespace = "de.enginecompanion"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "de.enginecompanion"
         minSdk = 28
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 6
         versionName = "0.3.1-readonly"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

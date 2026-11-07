@@ -18,10 +18,10 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Install Android SDK Platform 36
+      - name: Install Android SDK Platform 37
         run: |
           echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-37" "build-tools;36.0.0"
 
       - name: Make gradlew executable
         run: chmod +x gradlew
