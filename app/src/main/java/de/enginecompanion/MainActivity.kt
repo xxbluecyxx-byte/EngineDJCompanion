@@ -369,6 +369,9 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     var activeLoopNumber by remember(media.url) { mutableStateOf<Int?>(null) }
     val sampleRate = analysis?.beatGrid?.sampleRate?.takeIf { it.isFinite() && it > 0 }
     val activeLoop = analysis?.loops?.firstOrNull { it.number == activeLoopNumber }
+    val primeGridBpm = analysis?.beatGrid?.let(AnalysisDecoder::estimatedBpm)
+    var gridBpm by remember(media.url, primeGridBpm) { mutableStateOf(primeGridBpm) }
+    var gridOffsetMs by remember(media.url, primeGridBpm) { mutableLongStateOf(0L) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(value: Boolean) { playing = value }
@@ -417,6 +420,8 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             positionMs = position,
             durationMs = duration,
             detailLoading = waveformBusy,
+            gridBpm = gridBpm,
+            gridOffsetMs = gridOffsetMs,
             onSeek = seek
         )
     } ?: Surface(
@@ -437,6 +442,9 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
         PlayerPerformancePads(
             analysis = currentAnalysis,
             activeLoopNumber = activeLoopNumber,
+            gridBpm = gridBpm,
+            primeGridBpm = primeGridBpm,
+            gridOffsetMs = gridOffsetMs,
             enabled = ready,
             onCue = { samples ->
                 sampleRate?.let { rate ->
@@ -460,20 +468,46 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
                         player.play()
                     }
                 }
-            }
+            },
+            onGridBpm = { gridBpm = it.coerceIn(20.0, 400.0) },
+            onGridOffset = { gridOffsetMs = it.coerceIn(-30_000L, 30_000L) },
+            onGridReset = { gridBpm = primeGridBpm; gridOffsetMs = 0L }
         )
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlayerPerformancePads(
     analysis: TrackAnalysis,
     activeLoopNumber: Int?,
+    gridBpm: Double?,
+    primeGridBpm: Double?,
+    gridOffsetMs: Long,
     enabled: Boolean,
     onCue: (Double) -> Unit,
-    onLoop: (SavedLoop) -> Unit
+    onLoop: (SavedLoop) -> Unit,
+    onGridBpm: (Double) -> Unit,
+    onGridOffset: (Long) -> Unit,
+    onGridReset: () -> Unit
 ) {
-    Text("Hot Cues", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, bottom = 6.dp))
+    var selectedTool by rememberSaveable { mutableIntStateOf(0) }
+    SecondaryTabRow(selectedTabIndex = selectedTool, modifier = Modifier.padding(top = 16.dp)) {
+        Tab(selected = selectedTool == 0, onClick = { selectedTool = 0 }, text = { Text("Hot Cues") })
+        Tab(selected = selectedTool == 1, onClick = { selectedTool = 1 }, text = { Text("Beatgrid") })
+    }
+    if (selectedTool == 1) {
+        BeatgridControls(
+            analysis = analysis,
+            bpm = gridBpm,
+            primeBpm = primeGridBpm,
+            offsetMs = gridOffsetMs,
+            onBpm = onGridBpm,
+            onOffset = onGridOffset,
+            onReset = onGridReset
+        )
+        return
+    }
     val cues = analysis.cues.associateBy(CuePoint::number)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         repeat(2) { row ->
@@ -509,6 +543,63 @@ private fun PlayerPerformancePads(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun BeatgridControls(
+    analysis: TrackAnalysis,
+    bpm: Double?,
+    primeBpm: Double?,
+    offsetMs: Long,
+    onBpm: (Double) -> Unit,
+    onOffset: (Long) -> Unit,
+    onReset: () -> Unit
+) {
+    val grid = analysis.beatGrid
+    val markers = grid?.let { it.adjustedMarkers.ifEmpty { it.defaultMarkers } }.orEmpty()
+    var taps by remember { mutableStateOf<List<Long>>(emptyList()) }
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Quelle: Prime · beatData", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                Text("${markers.size} Marker · ${bpm?.let { String.format(Locale.ROOT, "%.3f BPM", it) } ?: "BPM unbekannt"}", fontWeight = FontWeight.Bold)
+                if (offsetMs != 0L || (bpm != null && primeBpm != null && kotlin.math.abs(bpm - primeBpm) > 0.0005)) {
+                    Text("Lokaler Entwurf · Offset ${if (offsetMs >= 0) "+" else ""}$offsetMs ms", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
+                } else Text("Unverändert vom Prime", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Text("Grid verschieben", fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(-10L, -1L, 1L, 10L).forEach { delta ->
+                OutlinedButton(onClick = { onOffset(offsetMs + delta) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 2.dp)) {
+                    Text(if (delta > 0) "+$delta" else "$delta")
+                }
+            }
+        }
+        Text("BPM korrigieren", fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = { bpm?.let { onBpm(it / 2.0) } }, enabled = bpm != null, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 2.dp)) { Text("÷2") }
+            OutlinedButton(onClick = { bpm?.let { onBpm(it - 0.01) } }, enabled = bpm != null, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 2.dp)) { Text("−0.01") }
+            OutlinedButton(onClick = { bpm?.let { onBpm(it + 0.01) } }, enabled = bpm != null, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 2.dp)) { Text("+0.01") }
+            OutlinedButton(onClick = { bpm?.let { onBpm(it * 2.0) } }, enabled = bpm != null, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 2.dp)) { Text("×2") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                val now = android.os.SystemClock.elapsedRealtime()
+                val next = if (taps.lastOrNull()?.let { now - it > 2_500 } != false) listOf(now) else (taps + now).takeLast(9)
+                taps = next
+                if (next.size >= 2) {
+                    val intervals = next.zipWithNext { a, b -> b - a }
+                    onBpm(60_000.0 / intervals.average())
+                }
+            }, modifier = Modifier.weight(1f)) { Text("TAP BPM") }
+            OutlinedButton(onClick = { taps = emptyList(); onReset() }, modifier = Modifier.weight(1f)) { Text("Prime-Werte") }
+        }
+        markers.take(4).forEachIndexed { index, marker ->
+            Text("Marker ${index + 1}: ${analysisPosition(marker.sampleOffset, grid?.sampleRate)} · Beat ${marker.beatNumber}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("Änderungen gelten aktuell nur für diesen Player und werden nicht zum Prime geschrieben.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -608,6 +699,8 @@ private fun PlayerWaveforms(
     positionMs: Long,
     durationMs: Long,
     detailLoading: Boolean,
+    gridBpm: Double?,
+    gridOffsetMs: Long,
     onSeek: (Long) -> Unit
 ) {
     val total = detailedWaveform?.points?.size ?: overviewWaveform.points.size
@@ -683,11 +776,11 @@ private fun PlayerWaveforms(
             val windowStartMs = startIndex.toDouble() / total * safeDuration.toDouble()
             val windowEndMs = endIndex.toDouble() / total * safeDuration.toDouble()
             val grid = analysis.beatGrid
-            val bpm = grid?.let(AnalysisDecoder::estimatedBpm)
+            val bpm = gridBpm ?: grid?.let(AnalysisDecoder::estimatedBpm)
             val anchor = grid?.let { it.adjustedMarkers.ifEmpty { it.defaultMarkers }.firstOrNull() }
             if (rate != null && bpm != null && anchor != null) {
                 val beatMs = 60_000.0 / bpm
-                val anchorMs = anchor.sampleOffset / rate * 1000.0
+                val anchorMs = anchor.sampleOffset / rate * 1000.0 + gridOffsetMs
                 var n = kotlin.math.floor((windowStartMs - anchorMs) / beatMs).toInt()
                 while (anchorMs + n * beatMs <= windowEndMs) {
                     val beatTime = anchorMs + n * beatMs
