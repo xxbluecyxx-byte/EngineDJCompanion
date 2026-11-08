@@ -23,6 +23,11 @@ data class EngineXDrive(
 
 data class EngineXConnection(val baseUrl: String, val drives: List<EngineXDrive>)
 data class EngineXTrackMedia(val url: String, val authorization: String)
+data class TrackMetadata(
+    val trackId: Long, val title: String, val artist: String, val album: String,
+    val genre: String, val comment: String, val label: String, val remixer: String,
+    val rating: Int, val backup: String? = null
+)
 data class EngineXSnapshot(
     val drive: String,
     val databaseUuid: String,
@@ -35,6 +40,41 @@ data class EngineXSnapshot(
 )
 
 class EngineXClient {
+    fun metadata(media: EngineXTrackMedia): TrackMetadata = metadataRequest(media, null)
+
+    fun updateMetadata(media: EngineXTrackMedia, value: TrackMetadata): TrackMetadata = metadataRequest(media, value)
+
+    private fun metadataRequest(media: EngineXTrackMedia, value: TrackMetadata?): TrackMetadata {
+        val endpoint = media.url.replace(Regex("/audio(?=\\?)"), "/metadata")
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = if (value == null) "GET" else "POST"
+            connectTimeout = 5_000; readTimeout = 120_000
+            setRequestProperty("Authorization", media.authorization)
+            setRequestProperty("Accept", "application/json")
+            if (value != null) {
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            }
+            useCaches = false
+        }
+        try {
+            if (value != null) connection.outputStream.bufferedWriter().use { writer ->
+                writer.write(org.json.JSONObject().apply {
+                    put("trackId", value.trackId); put("title", value.title); put("artist", value.artist)
+                    put("album", value.album); put("genre", value.genre); put("comment", value.comment)
+                    put("label", value.label); put("remixer", value.remixer); put("rating", value.rating)
+                }.toString())
+            }
+            val code = connection.responseCode
+            if (code == 401) throw SecurityException("EngineX-Zugriffscode wurde abgelehnt.")
+            if (code !in 200..299) throw IOException(connection.errorStream?.bufferedReader()?.use { it.readText() }?.trim().orEmpty().ifBlank { "Agent antwortet mit HTTP $code." })
+            val json = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            return TrackMetadata(json.getLong("trackId"), json.optString("title"), json.optString("artist"), json.optString("album"),
+                json.optString("genre"), json.optString("comment"), json.optString("label"), json.optString("remixer"),
+                json.optInt("rating"), json.optString("backup").takeIf(String::isNotBlank))
+        } finally { connection.disconnect() }
+    }
+
     fun connect(host: String, accessCode: String): EngineXConnection {
         require(accessCode.isNotBlank()) { "EngineX-Zugriffscode fehlt." }
         val base = normalizeBaseUrl(host)

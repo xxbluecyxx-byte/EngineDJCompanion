@@ -6,8 +6,8 @@ android {
         applicationId = "de.enginecompanion"
         minSdk = 28
         targetSdk = 36
-        versionCode = 25
-        versionName = "0.12.0-readonly"
+        versionCode = 26
+        versionName = "0.13.0-metadata-write-test"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {

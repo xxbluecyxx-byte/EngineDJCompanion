@@ -51,6 +51,8 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.common.util.UnstableApi
 import de.enginecompanion.data.*
 import de.enginecompanion.network.EngineXTrackMedia
+import de.enginecompanion.network.EngineXClient
+import de.enginecompanion.network.TrackMetadata
 import de.enginecompanion.ui.ExplorerViewModel
 import kotlinx.coroutines.*
 import java.util.Locale
@@ -107,6 +109,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
     var showEngineX by remember { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     val scope = rememberCoroutineScope()
     LaunchedEffect(vm) { onUsbRefreshAvailable(vm::refreshUsb) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -380,8 +383,19 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
     var tagTitle by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.title", null) ?: track?.title.orEmpty()) }
     var tagArtist by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.artist", null) ?: track?.artist.orEmpty()) }
     var tagAlbum by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.album", null) ?: track?.album.orEmpty()) }
+    var tagGenre by remember(media.url) { mutableStateOf(tagPreferences.getString("$gridDraftKey.genre", null).orEmpty()) }
+    var tagComment by remember(media.url) { mutableStateOf(tagPreferences.getString("$gridDraftKey.comment", null).orEmpty()) }
+    var tagLabel by remember(media.url) { mutableStateOf(tagPreferences.getString("$gridDraftKey.label", null).orEmpty()) }
+    var tagRemixer by remember(media.url) { mutableStateOf(tagPreferences.getString("$gridDraftKey.remixer", null).orEmpty()) }
     var tagRating by remember(media.url, track) { mutableIntStateOf(tagPreferences.getInt("$gridDraftKey.rating", track?.rating?.toIntOrNull() ?: 0)) }
-    val tagsChanged = track != null && (tagTitle != track.title || tagArtist != track.artist.orEmpty() || tagAlbum != track.album.orEmpty() || tagRating != (track.rating?.toIntOrNull() ?: 0))
+    var primeMetadata by remember(media.url) { mutableStateOf<TrackMetadata?>(null) }
+    var tagWriteStatus by remember(media.url) { mutableStateOf<String?>(null) }
+    var tagWriteBusy by remember(media.url) { mutableStateOf(false) }
+    val primeTitle = primeMetadata?.title ?: track?.title.orEmpty()
+    val primeArtist = primeMetadata?.artist ?: track?.artist.orEmpty()
+    val primeAlbum = primeMetadata?.album ?: track?.album.orEmpty()
+    val primeRating = primeMetadata?.rating ?: track?.rating?.toIntOrNull() ?: 0
+    val tagsChanged = track != null && (tagTitle != primeTitle || tagArtist != primeArtist || tagAlbum != primeAlbum || tagGenre != primeMetadata?.genre.orEmpty() || tagComment != primeMetadata?.comment.orEmpty() || tagLabel != primeMetadata?.label.orEmpty() || tagRemixer != primeMetadata?.remixer.orEmpty() || tagRating != primeRating)
     val cuesChanged = playerCues != primeCues
     val playerAnalysis = analysis?.copy(cues = playerCues)
     var gridBpm by remember(media.url, primeGridBpm) { mutableStateOf(gridPreferences.getString("$gridDraftKey.bpm", null)?.toDoubleOrNull() ?: primeGridBpm) }
@@ -403,15 +417,26 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             if (playerCues != primeCues) putString(gridDraftKey, writeCueDraft(playerCues)) else remove(gridDraftKey)
         }.apply()
     }
-    LaunchedEffect(tagTitle, tagArtist, tagAlbum, tagRating, tagsChanged, gridDraftKey) {
+    LaunchedEffect(media.url) {
+        runCatching { withContext(Dispatchers.IO) { EngineXClient().metadata(media) } }.onSuccess { remote ->
+            primeMetadata = remote
+            if (!tagPreferences.contains("$gridDraftKey.title")) {
+                tagTitle = remote.title; tagArtist = remote.artist; tagAlbum = remote.album; tagGenre = remote.genre
+                tagComment = remote.comment; tagLabel = remote.label; tagRemixer = remote.remixer; tagRating = remote.rating
+            }
+        }.onFailure { tagWriteStatus = "Metadaten-Agent: ${it.message}" }
+    }
+    LaunchedEffect(tagTitle, tagArtist, tagAlbum, tagGenre, tagComment, tagLabel, tagRemixer, tagRating, tagsChanged, gridDraftKey) {
         tagPreferences.edit().apply {
             if (tagsChanged) {
                 putString("$gridDraftKey.title", tagTitle)
                 putString("$gridDraftKey.artist", tagArtist)
                 putString("$gridDraftKey.album", tagAlbum)
+                putString("$gridDraftKey.genre", tagGenre); putString("$gridDraftKey.comment", tagComment)
+                putString("$gridDraftKey.label", tagLabel); putString("$gridDraftKey.remixer", tagRemixer)
                 putInt("$gridDraftKey.rating", tagRating)
             } else {
-                remove("$gridDraftKey.title"); remove("$gridDraftKey.artist"); remove("$gridDraftKey.album"); remove("$gridDraftKey.rating")
+                remove("$gridDraftKey.title"); remove("$gridDraftKey.artist"); remove("$gridDraftKey.album"); remove("$gridDraftKey.genre"); remove("$gridDraftKey.comment"); remove("$gridDraftKey.label"); remove("$gridDraftKey.remixer"); remove("$gridDraftKey.rating")
             }
         }.apply()
     }
@@ -495,8 +520,14 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             tagTitle = tagTitle,
             tagArtist = tagArtist,
             tagAlbum = tagAlbum,
+            tagGenre = tagGenre,
+            tagComment = tagComment,
+            tagLabel = tagLabel,
+            tagRemixer = tagRemixer,
             tagRating = tagRating,
             tagsChanged = tagsChanged,
+            tagWriteBusy = tagWriteBusy,
+            tagWriteStatus = tagWriteStatus,
             quantizeEnabled = quantizeEnabled,
             enabled = ready,
             onCue = { samples ->
@@ -538,8 +569,19 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             },
             onDeleteCue = { number -> playerCues = playerCues.filterNot { it.number == number } },
             onResetCues = { playerCues = primeCues },
-            onTags = { title, artist, album, rating -> tagTitle = title; tagArtist = artist; tagAlbum = album; tagRating = rating },
-            onResetTags = { tagTitle = track?.title.orEmpty(); tagArtist = track?.artist.orEmpty(); tagAlbum = track?.album.orEmpty(); tagRating = track?.rating?.toIntOrNull() ?: 0 },
+            onTags = { title, artist, album, genre, comment, label, remixer, rating -> tagTitle = title; tagArtist = artist; tagAlbum = album; tagGenre = genre; tagComment = comment; tagLabel = label; tagRemixer = remixer; tagRating = rating },
+            onResetTags = { tagTitle = primeTitle; tagArtist = primeArtist; tagAlbum = primeAlbum; tagGenre = primeMetadata?.genre.orEmpty(); tagComment = primeMetadata?.comment.orEmpty(); tagLabel = primeMetadata?.label.orEmpty(); tagRemixer = primeMetadata?.remixer.orEmpty(); tagRating = primeRating },
+            onApplyTags = {
+                track?.let { selected ->
+                    tagWriteBusy = true; tagWriteStatus = "Sicherung und Transaktion laufen …"
+                    scope.launch {
+                        runCatching { withContext(Dispatchers.IO) { EngineXClient().updateMetadata(media, TrackMetadata(selected.id, tagTitle, tagArtist, tagAlbum, tagGenre, tagComment, tagLabel, tagRemixer, tagRating)) } }
+                            .onSuccess { saved -> primeMetadata = saved; tagWriteStatus = "Auf Prime gespeichert · Sicherung: ${saved.backup?.substringAfterLast('/') ?: "erstellt"}" }
+                            .onFailure { tagWriteStatus = "Schreiben fehlgeschlagen: ${it.message}" }
+                        tagWriteBusy = false
+                    }
+                }
+            },
             onQuantize = { quantizeEnabled = it },
             onGridBpm = { gridBpm = it.coerceIn(20.0, 400.0) },
             onGridOffset = { gridOffsetMs = it.coerceIn(-30_000L, 30_000L) },
@@ -562,8 +604,14 @@ private fun PlayerPerformancePads(
     tagTitle: String,
     tagArtist: String,
     tagAlbum: String,
+    tagGenre: String,
+    tagComment: String,
+    tagLabel: String,
+    tagRemixer: String,
     tagRating: Int,
     tagsChanged: Boolean,
+    tagWriteBusy: Boolean,
+    tagWriteStatus: String?,
     quantizeEnabled: Boolean,
     enabled: Boolean,
     onCue: (Double) -> Unit,
@@ -571,8 +619,9 @@ private fun PlayerPerformancePads(
     onSetCue: (Int, Boolean) -> Unit,
     onDeleteCue: (Int) -> Unit,
     onResetCues: () -> Unit,
-    onTags: (String, String, String, Int) -> Unit,
+    onTags: (String, String, String, String, String, String, String, Int) -> Unit,
     onResetTags: () -> Unit,
+    onApplyTags: () -> Unit,
     onQuantize: (Boolean) -> Unit,
     onGridBpm: (Double) -> Unit,
     onGridOffset: (Long) -> Unit,
@@ -598,7 +647,7 @@ private fun PlayerPerformancePads(
         return
     }
     if (selectedTool == 2) {
-        TrackTagEditor(track, tagTitle, tagArtist, tagAlbum, tagRating, tagsChanged, onTags, onResetTags)
+        TrackTagEditor(track, tagTitle, tagArtist, tagAlbum, tagGenre, tagComment, tagLabel, tagRemixer, tagRating, tagsChanged, tagWriteBusy, tagWriteStatus, onTags, onResetTags, onApplyTags)
         return
     }
     var cueMode by rememberSaveable { mutableIntStateOf(0) }
@@ -667,11 +716,28 @@ private fun TrackTagEditor(
     title: String,
     artist: String,
     album: String,
+    genre: String,
+    comment: String,
+    label: String,
+    remixer: String,
     rating: Int,
     changed: Boolean,
-    onChange: (String, String, String, Int) -> Unit,
-    onReset: () -> Unit
+    writeBusy: Boolean,
+    writeStatus: String?,
+    onChange: (String, String, String, String, String, String, String, Int) -> Unit,
+    onReset: () -> Unit,
+    onApply: () -> Unit
 ) {
+    var confirmWrite by remember { mutableStateOf(false) }
+    fun change(newTitle: String = title, newArtist: String = artist, newAlbum: String = album, newGenre: String = genre, newComment: String = comment, newLabel: String = label, newRemixer: String = remixer, newRating: Int = rating) =
+        onChange(newTitle, newArtist, newAlbum, newGenre, newComment, newLabel, newRemixer, newRating)
+    if (confirmWrite) AlertDialog(
+        onDismissRequest = { confirmWrite = false },
+        title = { Text("Track auf dem Prime ändern?") },
+        text = { Text("Vor dem Update wird eine vollständige SQLite-Sicherung erstellt. Engine OS kann Metadaten im Speicher zwischenspeichern; deshalb testen wir zunächst nur diesen einen Track.") },
+        confirmButton = { TextButton(onClick = { confirmWrite = false; onApply() }) { Text("Sichern und anwenden") } },
+        dismissButton = { TextButton(onClick = { confirmWrite = false }) { Text("Abbrechen") } }
+    )
     Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Column {
@@ -680,20 +746,26 @@ private fun TrackTagEditor(
             }
             if (changed) TextButton(onClick = onReset) { Text("Prime-Tags") }
         }
-        OutlinedTextField(title, { onChange(it, artist, album, rating) }, label = { Text("Titel") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(artist, { onChange(title, it, album, rating) }, label = { Text("Interpret") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(album, { onChange(title, artist, it, rating) }, label = { Text("Album") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(title, { change(newTitle = it) }, label = { Text("Titel") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(artist, { change(newArtist = it) }, label = { Text("Interpret") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(album, { change(newAlbum = it) }, label = { Text("Album") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(genre, { change(newGenre = it) }, label = { Text("Genre") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(label, { change(newLabel = it) }, label = { Text("Label") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(remixer, { change(newRemixer = it) }, label = { Text("Remixer") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(comment, { change(newComment = it) }, label = { Text("Kommentar") }, minLines = 2, modifier = Modifier.fillMaxWidth())
         Text("Bewertung", fontWeight = FontWeight.SemiBold)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             repeat(5) { index ->
                 val starValue = (index + 1) * 20
-                TextButton(onClick = { onChange(title, artist, album, if (rating == starValue) 0 else starValue) }) {
+                TextButton(onClick = { change(newRating = if (rating == starValue) 0 else starValue) }) {
                     Text(if (rating >= starValue) "★" else "☆", style = MaterialTheme.typography.headlineMedium, color = if (rating >= starValue) Color(0xFFFFD54F) else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
         Text("${rating / 20} von 5 Sternen", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Der Entwurf bleibt auf diesem Handy gespeichert. Schreiben zum Prime folgt erst mit einem abgesicherten WLAN-Schreibdienst.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = { confirmWrite = true }, enabled = changed && !writeBusy && title.isNotBlank() && track != null, modifier = Modifier.fillMaxWidth()) { Text(if (writeBusy) "Sicherung läuft …" else "Auf Prime anwenden") }
+        writeStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Schreiben fehlgeschlagen") || it.startsWith("Metadaten-Agent")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary) }
+        Text("Schreibtest für genau diesen Track. Vor jeder Transaktion wird m.db nach Database2/CompanionBackups gesichert.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (track == null) Text("Für diesen Track sind keine WLAN-Metadaten verfügbar.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
 }

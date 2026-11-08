@@ -1,5 +1,5 @@
 [Unit]
-Description=Engine Companion read-only track service
+Description=Engine Companion track service
 After=enginex-stream-sync.service
 
 [Service]

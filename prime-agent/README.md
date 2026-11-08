@@ -7,8 +7,9 @@ Kleiner, separat gebauter ARMv7-Dienst für EngineX OS auf dem Prime 4+. Der Die
 - `GET /api/companion/v1/health`
 - `GET /api/companion/v1/tracks/{id}/analysis?drive=Engine`
 - `GET|HEAD /api/companion/v1/tracks/{id}/audio?drive=Engine`
+- `GET|POST /api/companion/v1/tracks/{id}/metadata?drive=Engine`
 
-Alle Routen benötigen `Authorization: Bearer <EngineX-Code>`. Es gibt keine frei wählbaren Dateipfade und keine schreibende Route. Trackpfade werden ausschließlich per numerischer Track-ID aus der bestätigten `m.db` gelesen, kanonisiert und auf `/media/Engine/Engine Library` begrenzt. Dieser Bezug wurde mit einem echten `Track.path` auf dem Prime 4+ bestätigt. SQLite wird mit `mode=ro` und `query_only` geöffnet; andere Schema-Versionen als 3.0.2 werden abgelehnt.
+Alle Routen benötigen `Authorization: Bearer <EngineX-Code>`. Trackpfade werden ausschließlich per numerischer Track-ID aus der bestätigten `m.db` gelesen. Die Metadatenroute darf nur feste Track-Spalten ändern und erstellt vor jedem Schreibvorgang mit SQLite `VACUUM INTO` eine konsistente Sicherung unter `Database2/CompanionBackups`. Alle normalen Lesezugriffe verwenden weiterhin `mode=ro` und `query_only`; andere Schema-Versionen als 3.0.2 werden abgelehnt.
 
 Der Analyse-Endpunkt liefert `beatData`, `quickCues`, `loops` und `overviewWaveformData` als Base64-kodierte JSON-Felder. Audio verwendet Go `ServeContent` und unterstützt dadurch HTTP-Range-Anfragen für Player-Seeking.
 

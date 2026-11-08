@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 2
+	agentVersion  = 3
 )
 
 type drive struct {
@@ -52,6 +53,21 @@ type analysisResponse struct {
 	OverviewWaveformData []byte `json:"overviewWaveformData,omitempty"`
 }
 
+type metadataResponse struct {
+	TrackID int64 `json:"trackId"`
+	Title string `json:"title"`
+	Artist string `json:"artist"`
+	Album string `json:"album"`
+	Genre string `json:"genre"`
+	Comment string `json:"comment"`
+	Label string `json:"label"`
+	Remixer string `json:"remixer"`
+	Rating int `json:"rating"`
+	Backup string `json:"backup,omitempty"`
+}
+
+var safeDriveName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 func main() {
 	s := &server{drives: allowedDrives, tokenFile: tokenPath, semaphore: make(chan struct{}, 2)}
 	mux := http.NewServeMux()
@@ -71,7 +87,7 @@ func main() {
 
 func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -97,7 +113,7 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true})
 }
 
 func (s *server) track(w http.ResponseWriter, r *http.Request) {
@@ -122,9 +138,71 @@ func (s *server) track(w http.ResponseWriter, r *http.Request) {
 		s.analysis(w, r, d, trackID)
 	case "audio":
 		s.audio(w, r, d, trackID)
+	case "metadata":
+		s.metadata(w, r, d, trackID)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *server) metadata(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		db, _, err := openLibrary(r, d.db)
+		if err != nil { http.Error(w, err.Error(), http.StatusServiceUnavailable); return }
+		defer db.Close()
+		var out metadataResponse
+		out.TrackID = trackID
+		err = db.QueryRowContext(r.Context(), `SELECT coalesce(title,''),coalesce(artist,''),coalesce(album,''),coalesce(genre,''),coalesce(comment,''),coalesce(label,''),coalesce(remixer,''),coalesce(rating,0) FROM Track WHERE id=?`, trackID).
+			Scan(&out.Title, &out.Artist, &out.Album, &out.Genre, &out.Comment, &out.Label, &out.Remixer, &out.Rating)
+		if errors.Is(err, sql.ErrNoRows) { http.Error(w, "track not found", http.StatusNotFound); return }
+		if err != nil { http.Error(w, "metadata query failed", http.StatusInternalServerError); return }
+		writeJSON(w, out)
+		return
+	}
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var input metadataResponse
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil { http.Error(w, "invalid metadata", http.StatusBadRequest); return }
+	if input.TrackID != 0 && input.TrackID != trackID { http.Error(w, "track id mismatch", http.StatusBadRequest); return }
+	if strings.TrimSpace(input.Title) == "" || input.Rating < 0 || input.Rating > 100 || input.Rating%20 != 0 { http.Error(w, "invalid title or rating", http.StatusBadRequest); return }
+	for _, value := range []string{input.Title, input.Artist, input.Album, input.Genre, input.Comment, input.Label, input.Remixer} {
+		if len(value) > 2048 { http.Error(w, "metadata value too long", http.StatusBadRequest); return }
+	}
+	backup, err := backupLibrary(r, d.db, r.URL.Query().Get("drive"))
+	if err != nil { http.Error(w, "backup failed: "+err.Error(), http.StatusServiceUnavailable); return }
+	dsn := (&url.URL{Scheme: "file", Path: d.db, RawQuery: "mode=rw&_pragma=busy_timeout(5000)"}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil { http.Error(w, "library write open failed", http.StatusServiceUnavailable); return }
+	defer db.Close(); db.SetMaxOpenConns(1)
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil { http.Error(w, "library busy", http.StatusConflict); return }
+	result, err := tx.ExecContext(r.Context(), `UPDATE Track SET title=?,artist=?,album=?,genre=?,comment=?,label=?,remixer=?,rating=?,lastEditTime=? WHERE id=?`,
+		strings.TrimSpace(input.Title), input.Artist, input.Album, input.Genre, input.Comment, input.Label, input.Remixer, input.Rating, time.Now().Unix(), trackID)
+	if err == nil { var changed int64; changed, err = result.RowsAffected(); if err == nil && changed != 1 { err = errors.New("track not found") } }
+	if err != nil { _ = tx.Rollback(); http.Error(w, "metadata update failed", http.StatusInternalServerError); return }
+	if err = tx.Commit(); err != nil { http.Error(w, "metadata commit failed", http.StatusInternalServerError); return }
+	input.TrackID, input.Backup = trackID, backup
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, input)
+}
+
+func backupLibrary(r *http.Request, path, driveName string) (string, error) {
+	if !safeDriveName.MatchString(driveName) { return "", errors.New("invalid drive") }
+	dir := filepath.Join(filepath.Dir(path), "CompanionBackups")
+	if err := os.MkdirAll(dir, 0755); err != nil { return "", err }
+	name := fmt.Sprintf("m-%s-%s.db", driveName, time.Now().UTC().Format("20060102T150405.000000000Z"))
+	destination := filepath.Join(dir, name)
+	dsn := (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro&_pragma=busy_timeout(5000)"}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil { return "", err }
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	var major, minor, patch int
+	if err = db.QueryRowContext(r.Context(), `SELECT schemaVersionMajor,schemaVersionMinor,schemaVersionPatch FROM Information LIMIT 1`).Scan(&major, &minor, &patch); err != nil { return "", err }
+	if fmt.Sprintf("%d.%d.%d", major, minor, patch) != "3.0.2" { return "", errors.New("unsupported schema") }
+	quoted := strings.ReplaceAll(destination, "'", "''")
+	if _, err = db.ExecContext(r.Context(), "VACUUM INTO '"+quoted+"'"); err != nil { return "", err }
+	return destination, nil
 }
 
 func (s *server) analysis(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
