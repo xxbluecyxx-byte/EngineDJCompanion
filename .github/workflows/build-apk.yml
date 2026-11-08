@@ -98,7 +98,10 @@ jobs:
         run: go mod tidy
 
       - name: Test agent
-        run: go test ./...
+        run: |
+          go test ./...
+          sh -n install-agent.sh
+          sh -n uninstall-agent.sh
 
       - name: Build Prime 4+ ARMv7 agent
         env:
@@ -118,5 +121,7 @@ jobs:
             prime-agent/engine-companion-agent
             prime-agent/engine-companion-agent.sha256
             prime-agent/engine-companion-agent.service
+            prime-agent/install-agent.sh
+            prime-agent/uninstall-agent.sh
           retention-days: 14
           if-no-files-found: error

@@ -25,4 +25,22 @@ GitHub Actions führt die Tests auf Linux aus und baut anschließend ohne CGo f�
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o engine-companion-agent .
 ```
 
-Das Workflow-Artefakt `EngineCompanion-Prime-agent-armv7` enthält Binary, SHA-256-Datei und eine systemd-Servicevorlage. Installation erfolgt erst nach erfolgreichem CI-Build und einer manuellen Hash-Prüfung auf dem Prime.
+Das Workflow-Artefakt `EngineCompanion-Prime-agent-armv7` enthält Binary, SHA-256-Datei, die systemd-Unit sowie Installations- und Deinstallationsskript. Der Installer prüft den Hash, ersetzt das Binary atomar, aktiviert den Dienst dauerhaft für `multi-user.target` und prüft anschließend den authentifizierten Health-Endpunkt. Scheitert Start oder Healthcheck, wird die vorige Installation automatisch wiederhergestellt.
+
+Alle fünf Dateien aus dem Artefakt zusammen nach `/tmp/engine-companion-agent-install/` auf den Prime kopieren und dort ausführen:
+
+```sh
+cd /tmp/engine-companion-agent-install
+chmod 755 install-agent.sh uninstall-agent.sh
+./install-agent.sh
+systemctl status engine-companion-agent --no-pager -l
+systemctl is-enabled engine-companion-agent
+```
+
+Dasselbe Kommando aktualisiert eine bestehende Installation. Installer und Deinstaller werden dabei dauerhaft unter `/data/sc5000-custom/companion/` abgelegt. Das zuletzt ersetzte Binary bleibt als `/data/sc5000-custom/bundle/bin/engine-companion-agent.previous` erhalten. Installationsstatus und letzter erfolgreicher Healthcheck liegen ebenfalls im Companion-Verzeichnis.
+
+Der Boot-Start kann ohne Löschen von Binary, Zugriffscode oder Datenbanksicherungen wieder entfernt werden:
+
+```sh
+/data/sc5000-custom/companion/uninstall-agent.sh
+```
