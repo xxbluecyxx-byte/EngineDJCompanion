@@ -367,6 +367,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var activeLoopNumber by remember(media.url) { mutableStateOf<Int?>(null) }
+    var quantizeEnabled by rememberSaveable(media.url) { mutableStateOf(true) }
     val sampleRate = analysis?.beatGrid?.sampleRate?.takeIf { it.isFinite() && it > 0 }
     val activeLoop = analysis?.loops?.firstOrNull { it.number == activeLoopNumber }
     val primeGridBpm = analysis?.beatGrid?.let(AnalysisDecoder::estimatedBpm)
@@ -446,6 +447,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             detailLoading = waveformBusy,
             gridBpm = gridBpm,
             gridOffsetMs = gridOffsetMs,
+            quantizeEnabled = quantizeEnabled,
             onSeek = seek
         )
     } ?: Surface(
@@ -471,6 +473,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             gridOffsetMs = gridOffsetMs,
             playheadMs = position,
             cuesChanged = cuesChanged,
+            quantizeEnabled = quantizeEnabled,
             enabled = ready,
             onCue = { samples ->
                 sampleRate?.let { rate ->
@@ -495,15 +498,23 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
                     }
                 }
             },
-            onSetCue = { number ->
+            onSetCue = { number, quantize ->
                 sampleRate?.let { rate ->
                     val colors = listOf("#F4D338", "#EF8130", "#3D9BFF", "#36D67E", "#E85DAD", "#38D9D9", "#9B72FF", "#EF5350")
-                    val cue = CuePoint(number, "Cue $number", position / 1000.0 * rate, colors[(number - 1).coerceIn(0, colors.lastIndex)])
+                    var cueMs = position.toDouble()
+                    val firstMarker = currentAnalysis.beatGrid?.let { it.adjustedMarkers.ifEmpty { it.defaultMarkers }.firstOrNull() }
+                    if (quantize && firstMarker != null && gridBpm != null) {
+                        val anchorMs = firstMarker.sampleOffset / rate * 1000.0 + gridOffsetMs
+                        val beatMs = 60_000.0 / gridBpm!!
+                        cueMs = anchorMs + kotlin.math.round((cueMs - anchorMs) / beatMs) * beatMs
+                    }
+                    val cue = CuePoint(number, "Cue $number", cueMs.coerceAtLeast(0.0) / 1000.0 * rate, colors[(number - 1).coerceIn(0, colors.lastIndex)])
                     playerCues = (playerCues.filterNot { it.number == number } + cue).sortedBy(CuePoint::number)
                 }
             },
             onDeleteCue = { number -> playerCues = playerCues.filterNot { it.number == number } },
             onResetCues = { playerCues = primeCues },
+            onQuantize = { quantizeEnabled = it },
             onGridBpm = { gridBpm = it.coerceIn(20.0, 400.0) },
             onGridOffset = { gridOffsetMs = it.coerceIn(-30_000L, 30_000L) },
             onGridReset = { gridBpm = primeGridBpm; gridOffsetMs = 0L }
@@ -521,12 +532,14 @@ private fun PlayerPerformancePads(
     gridOffsetMs: Long,
     playheadMs: Long,
     cuesChanged: Boolean,
+    quantizeEnabled: Boolean,
     enabled: Boolean,
     onCue: (Double) -> Unit,
     onLoop: (SavedLoop) -> Unit,
-    onSetCue: (Int) -> Unit,
+    onSetCue: (Int, Boolean) -> Unit,
     onDeleteCue: (Int) -> Unit,
     onResetCues: () -> Unit,
+    onQuantize: (Boolean) -> Unit,
     onGridBpm: (Double) -> Unit,
     onGridOffset: (Long) -> Unit,
     onGridReset: () -> Unit
@@ -550,7 +563,11 @@ private fun PlayerPerformancePads(
         return
     }
     var cueMode by rememberSaveable { mutableIntStateOf(0) }
-    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text("Hot-Cue-Werkzeug", fontWeight = FontWeight.SemiBold)
+        FilterChip(selected = quantizeEnabled, onClick = { onQuantize(!quantizeEnabled) }, label = { Text(if (quantizeEnabled) "Q Quantize" else "Quantize aus") })
+    }
+    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf("Auslösen", "Setzen", "Löschen").forEachIndexed { index, label ->
             FilterChip(selected = cueMode == index, onClick = { cueMode = index }, label = { Text(label) }, modifier = Modifier.weight(1f))
         }
@@ -572,7 +589,7 @@ private fun PlayerPerformancePads(
                     Button(
                         onClick = {
                             when (cueMode) {
-                                1 -> onSetCue(number)
+                                1 -> onSetCue(number, quantizeEnabled)
                                 2 -> onDeleteCue(number)
                                 else -> cue?.let { onCue(it.sampleOffset) }
                             }
@@ -801,6 +818,7 @@ private fun PlayerWaveforms(
     detailLoading: Boolean,
     gridBpm: Double?,
     gridOffsetMs: Long,
+    quantizeEnabled: Boolean,
     onSeek: (Long) -> Unit
 ) {
     val total = detailedWaveform?.points?.size ?: overviewWaveform.points.size
@@ -849,7 +867,10 @@ private fun PlayerWaveforms(
             analysis.cues.forEach { cue ->
                 val cueMs = if (rate != null) cue.sampleOffset / rate * 1000.0 else return@forEach
                 val cueX = (cueMs / safeDuration * size.width).toFloat()
-                drawLine(analysisColor(cue.color), Offset(cueX, 0f), Offset(cueX, size.height), 2f)
+                val cueColor = analysisColor(cue.color)
+                drawLine(cueColor, Offset(cueX, 0f), Offset(cueX, size.height), 3f)
+                drawCircle(cueColor, 5f, Offset(cueX, 7f))
+                drawCircle(Color.Black, 2f, Offset(cueX, 7f))
             }
             drawLine(Color(0xFF00E5FF), Offset(progress * size.width, 0f), Offset(progress * size.width, size.height), 2.5f)
         }
@@ -878,18 +899,6 @@ private fun PlayerWaveforms(
             val grid = analysis.beatGrid
             val bpm = gridBpm ?: grid?.let(AnalysisDecoder::estimatedBpm)
             val anchor = grid?.let { it.adjustedMarkers.ifEmpty { it.defaultMarkers }.firstOrNull() }
-            if (rate != null && bpm != null && anchor != null) {
-                val beatMs = 60_000.0 / bpm
-                val anchorMs = anchor.sampleOffset / rate * 1000.0 + gridOffsetMs
-                var n = kotlin.math.floor((windowStartMs - anchorMs) / beatMs).toInt()
-                while (anchorMs + n * beatMs <= windowEndMs) {
-                    val beatTime = anchorMs + n * beatMs
-                    val x = ((beatTime - windowStartMs) / (windowEndMs - windowStartMs) * size.width).toFloat()
-                    val major = (anchor.beatNumber + n.toLong()) % 4L == 0L
-                    drawLine(if (major) Color(0xFF607D8B) else Color(0xFF263238), Offset(x, 0f), Offset(x, size.height), if (major) 1.5f else 1f)
-                    n++
-                }
-            }
             val sourceStart = startIndex.coerceAtLeast(0)
             val sourceEnd = endIndex.coerceAtMost(total)
             if (sourceEnd > sourceStart && detailTiles.isNotEmpty()) {
@@ -913,11 +922,30 @@ private fun PlayerWaveforms(
                     )
                 }
             }
+            // Draw the grid over the waveform so transients cannot hide it.
+            if (rate != null && bpm != null && anchor != null) {
+                val beatMs = 60_000.0 / bpm
+                val anchorMs = anchor.sampleOffset / rate * 1000.0 + gridOffsetMs
+                var n = kotlin.math.floor((windowStartMs - anchorMs) / beatMs).toInt()
+                while (anchorMs + n * beatMs <= windowEndMs) {
+                    val beatTime = anchorMs + n * beatMs
+                    val x = ((beatTime - windowStartMs) / (windowEndMs - windowStartMs) * size.width).toFloat()
+                    val major = (anchor.beatNumber + n.toLong()) % 4L == 0L
+                    val gridColor = if (major) Color(0xFFFF5252) else Color.White.copy(alpha = 0.62f)
+                    drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), if (major) 2.5f else 1.25f)
+                    drawCircle(gridColor, if (major) 4.5f else 2.5f, Offset(x, 7f))
+                    drawCircle(gridColor, if (major) 4.5f else 2.5f, Offset(x, size.height - 7f))
+                    n++
+                }
+            }
             analysis.cues.forEach { cue ->
                 val cueMs = if (rate != null) cue.sampleOffset / rate * 1000.0 else return@forEach
                 if (cueMs in windowStartMs..windowEndMs) {
                     val x = ((cueMs - windowStartMs) / (windowEndMs - windowStartMs) * size.width).toFloat()
-                    drawLine(analysisColor(cue.color), Offset(x, 0f), Offset(x, size.height), 3f)
+                    val cueColor = analysisColor(cue.color)
+                    drawLine(cueColor, Offset(x, 0f), Offset(x, size.height), 4f)
+                    drawCircle(cueColor, 8f, Offset(x, 11f))
+                    drawCircle(Color.Black, 3f, Offset(x, 11f))
                 }
             }
             drawLine(Color.White, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), 3f)
@@ -930,7 +958,7 @@ private fun PlayerWaveforms(
                 }
             }
         }
-        Text("Oben Marker ziehen · unten wie ein Jog nach links oder rechts wischen", style = MaterialTheme.typography.labelSmall, color = Color(0xFF78909C), modifier = Modifier.padding(top = 4.dp))
+        Text("${if (quantizeEnabled) "Q · " else ""}Oben Marker ziehen · unten wie ein Jog wischen", style = MaterialTheme.typography.labelSmall, color = if (quantizeEnabled) MaterialTheme.colorScheme.primary else Color(0xFF78909C), modifier = Modifier.padding(top = 4.dp))
     }
 }
 
