@@ -10,17 +10,20 @@ data class CuePoint(val number: Int, val label: String, val sampleOffset: Double
 data class SavedLoop(val number: Int, val label: String, val startSample: Double, val endSample: Double, val color: String)
 data class BeatMarker(val sampleOffset: Double, val beatNumber: Long, val beats: Int)
 data class BeatGrid(val sampleRate: Double, val isSet: Boolean, val defaultMarkers: List<BeatMarker>, val adjustedMarkers: List<BeatMarker>)
-data class TrackAnalysis(val beatGrid: BeatGrid?, val cues: List<CuePoint>, val loops: List<SavedLoop>, val mainCueSample: Double?)
+data class WaveformPoint(val low: Int, val mid: Int, val high: Int)
+data class OverviewWaveform(val samplesPerPoint: Double, val points: List<WaveformPoint>, val maxLow: Int, val maxMid: Int, val maxHigh: Int)
+data class TrackAnalysis(val beatGrid: BeatGrid?, val cues: List<CuePoint>, val loops: List<SavedLoop>, val mainCueSample: Double?, val waveform: OverviewWaveform? = null)
 
 object AnalysisDecoder {
     private const val MAX_INFLATED_BYTES = 64 * 1024 * 1024
     private const val MAX_ENTRIES = 10_000
 
-    fun decode(beatData: ByteArray?, quickCues: ByteArray?, loops: ByteArray?): TrackAnalysis {
+    fun decode(beatData: ByteArray?, quickCues: ByteArray?, loops: ByteArray?, overviewWaveform: ByteArray? = null): TrackAnalysis {
+        val waveform = overviewWaveform?.takeIf { it.isNotEmpty() }?.let(::decodeOverviewWaveform)
         val grid = beatData?.takeIf { it.isNotEmpty() }?.let(::decodeBeatGrid)
         val cueResult = quickCues?.takeIf { it.isNotEmpty() }?.let(::decodeCues)
         val savedLoops = loops?.takeIf { it.isNotEmpty() }?.let(::decodeLoops).orEmpty()
-        return TrackAnalysis(grid, cueResult?.first.orEmpty(), savedLoops, cueResult?.second)
+        return TrackAnalysis(grid, cueResult?.first.orEmpty(), savedLoops, cueResult?.second, waveform)
     }
 
     fun estimatedBpm(grid: BeatGrid): Double? {
@@ -121,6 +124,22 @@ object AnalysisDecoder {
     }
 
     private fun color(red: Int, green: Int, blue: Int) = "#%02X%02X%02X".format(red, green, blue)
+
+
+    private fun decodeOverviewWaveform(blob: ByteArray): OverviewWaveform {
+        val cursor = Cursor(inflateQt(blob))
+        val count1 = cursor.i64(ByteOrder.BIG_ENDIAN).toInt()
+        val count2 = cursor.i64(ByteOrder.BIG_ENDIAN).toInt()
+        require(count1 == count2 && count1 in 1..8192) { "Ungültige Waveform-Länge: $count1" }
+        val samplesPerPoint = cursor.f64(ByteOrder.BIG_ENDIAN)
+        val points = List(count1) {
+            WaveformPoint(cursor.u8(), cursor.u8(), cursor.u8())
+        }
+        val maxLow = cursor.u8()
+        val maxMid = cursor.u8()
+        val maxHigh = cursor.u8()
+        return OverviewWaveform(samplesPerPoint, points, maxLow, maxMid, maxHigh)
+    }
 
     private fun inflateQt(blob: ByteArray): ByteArray {
         require(blob.size >= 6) { "Komprimierter Analyse-BLOB ist zu kurz." }
