@@ -13,8 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -23,7 +25,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 3
+	agentVersion  = 4
 )
 
 type drive struct {
@@ -42,6 +44,8 @@ type server struct {
 	drives    map[string]drive
 	tokenFile string
 	semaphore chan struct{}
+	backupMu  sync.Mutex
+	backups   map[string]string
 }
 
 type analysisResponse struct {
@@ -69,7 +73,7 @@ type metadataResponse struct {
 var safeDriveName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func main() {
-	s := &server{drives: allowedDrives, tokenFile: tokenPath, semaphore: make(chan struct{}, 2)}
+	s := &server{drives: allowedDrives, tokenFile: tokenPath, semaphore: make(chan struct{}, 2), backups: make(map[string]string)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/companion/v1/health", s.authorize(s.health))
 	mux.HandleFunc("/api/companion/v1/tracks/", s.authorize(s.track))
@@ -168,7 +172,7 @@ func (s *server) metadata(w http.ResponseWriter, r *http.Request, d drive, track
 	for _, value := range []string{input.Title, input.Artist, input.Album, input.Genre, input.Comment, input.Label, input.Remixer} {
 		if len(value) > 2048 { http.Error(w, "metadata value too long", http.StatusBadRequest); return }
 	}
-	backup, err := backupLibrary(r, d.db, r.URL.Query().Get("drive"))
+	backup, err := s.backupLibrary(r, d.db, r.URL.Query().Get("drive"))
 	if err != nil { http.Error(w, "backup failed: "+err.Error(), http.StatusServiceUnavailable); return }
 	dsn := (&url.URL{Scheme: "file", Path: d.db, RawQuery: "mode=rw&_pragma=busy_timeout(5000)"}).String()
 	db, err := sql.Open("sqlite", dsn)
@@ -186,8 +190,13 @@ func (s *server) metadata(w http.ResponseWriter, r *http.Request, d drive, track
 	writeJSON(w, input)
 }
 
-func backupLibrary(r *http.Request, path, driveName string) (string, error) {
+func (s *server) backupLibrary(r *http.Request, path, driveName string) (string, error) {
+	s.backupMu.Lock()
+	defer s.backupMu.Unlock()
 	if !safeDriveName.MatchString(driveName) { return "", errors.New("invalid drive") }
+	if existing := s.backups[driveName]; existing != "" {
+		if _, err := os.Stat(existing); err == nil { return existing, nil }
+	}
 	dir := filepath.Join(filepath.Dir(path), "CompanionBackups")
 	if err := os.MkdirAll(dir, 0755); err != nil { return "", err }
 	name := fmt.Sprintf("m-%s-%s.db", driveName, time.Now().UTC().Format("20060102T150405.000000000Z"))
@@ -202,7 +211,31 @@ func backupLibrary(r *http.Request, path, driveName string) (string, error) {
 	if fmt.Sprintf("%d.%d.%d", major, minor, patch) != "3.0.2" { return "", errors.New("unsupported schema") }
 	quoted := strings.ReplaceAll(destination, "'", "''")
 	if _, err = db.ExecContext(r.Context(), "VACUUM INTO '"+quoted+"'"); err != nil { return "", err }
+	checkDSN := (&url.URL{Scheme: "file", Path: destination, RawQuery: "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)"}).String()
+	checkDB, err := sql.Open("sqlite", checkDSN)
+	if err != nil { _ = os.Remove(destination); return "", err }
+	var integrity string
+	err = checkDB.QueryRowContext(r.Context(), `PRAGMA integrity_check`).Scan(&integrity)
+	checkDB.Close()
+	if err != nil || integrity != "ok" { _ = os.Remove(destination); return "", errors.New("backup integrity check failed") }
+	s.backups[driveName] = destination
+	pruneBackups(dir, 5)
 	return destination, nil
+}
+
+func pruneBackups(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil { return }
+	type backupFile struct { path string; modified time.Time }
+	files := make([]backupFile, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "m-") || !strings.HasSuffix(entry.Name(), ".db") { continue }
+		if info, err := entry.Info(); err == nil { files = append(files, backupFile{filepath.Join(dir, entry.Name()), info.ModTime()}) }
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].modified.After(files[j].modified) })
+	if len(files) > keep {
+		for _, file := range files[keep:] { _ = os.Remove(file.path) }
+	}
 }
 
 func (s *server) analysis(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
