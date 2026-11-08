@@ -1,13 +1,23 @@
-name: Build Debug APK
+name: Android CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,6 +27,7 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
       - name: Install Android SDK Platform 36
         run: |
@@ -26,8 +37,8 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Test, lint and build
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -35,3 +46,15 @@ jobs:
           name: EngineDJCompanion-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload verification reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EngineDJCompanion-verification-reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
