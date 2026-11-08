@@ -320,12 +320,12 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         state.detailMedia?.let { media ->
-                            WlanPlayer(media)
+                            WlanPlayer(media, analysis.waveform)
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
                         state.detailAnalysis?.let { analysis ->
                             AnalysisOverview(analysis)
-                            analysis.waveform?.let { OverviewWaveformView(it) }
+                            
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                             Text("Technischer Bericht", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
@@ -340,7 +340,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun WlanPlayer(media: EngineXTrackMedia) {
+private fun WlanPlayer(media: EngineXTrackMedia, waveform: OverviewWaveform? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember(media.url, media.authorization) {
         val http = DefaultHttpDataSource.Factory()
@@ -383,6 +383,7 @@ private fun WlanPlayer(media: EngineXTrackMedia) {
         enabled = ready && duration > 0,
         modifier = Modifier.fillMaxWidth()
     )
+    waveform?.let { DualWaveform(it, position, duration) { player.seekTo(it) } }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(playerTime(position), style = MaterialTheme.typography.labelMedium)
         Text(playerTime(duration), style = MaterialTheme.typography.labelMedium)
@@ -480,19 +481,52 @@ private fun bytes(value: Long): String {
     return String.format(Locale.ROOT, "%.1f %s", value / 1024.0.pow(unit), listOf("KiB", "MiB", "GiB", "TiB")[unit - 1])
 }
 
+
 @Composable
-private fun OverviewWaveformView(waveform: OverviewWaveform) {
+private fun DualWaveform(
+    waveform: OverviewWaveform,
+    positionMs: Long,
+    durationMs: Long,
+    onSeek: (Long) -> Unit
+) {
     val max = maxOf(waveform.maxLow, waveform.maxMid, waveform.maxHigh, 1)
-    Canvas(Modifier.fillMaxWidth().height(80.dp)) {
-        val barWidth = size.width / waveform.points.size
-        waveform.points.forEachIndexed { i, point ->
-            val x = i * barWidth
-            val lowH = (point.low / max.toFloat()) * size.height
-            val midH = (point.mid / max.toFloat()) * size.height
-            val highH = (point.high / max.toFloat()) * size.height
-            drawRect(Color(0xFF4A90D9), Offset(x, size.height - lowH), Size(barWidth * 0.9f, lowH))
-            drawRect(Color(0xFF7ED321), Offset(x, size.height - midH), Size(barWidth * 0.6f, midH))
-            drawRect(Color.White, Offset(x + barWidth * 0.2f, size.height - highH), Size(barWidth * 0.3f, highH))
+    val progress = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
+    val zoom = 0.08f // \~8% des Tracks sichtbar im Detail
+
+    Column(Modifier.fillMaxWidth()) {
+        // Overview
+        Canvas(
+            Modifier.fillMaxWidth().height(48.dp)
+                .clickable { /* optional seek on overview */ }
+        ) {
+            val barWidth = size.width / waveform.points.size
+            waveform.points.forEachIndexed { i, point ->
+                val x = i * barWidth
+                val h = (maxOf(point.low, point.mid, point.high) / max.toFloat()) * size.height
+                drawRect(Color(0xFF2A5A8A), Offset(x, size.height - h), Size(barWidth * 0.85f, h))
+            }
+            val playX = progress * size.width
+            drawLine(Color.White, Offset(playX, 0f), Offset(playX, size.height), 2f)
+        }
+        Spacer(Modifier.height(4.dp))
+        // Detail (scrollend)
+        Canvas(Modifier.fillMaxWidth().height(96.dp)) {
+            val total = waveform.points.size
+            val visible = (total * zoom).toInt().coerceAtLeast(32)
+            val center = (progress * total).toInt()
+            val start = (center - visible / 2).coerceIn(0, total - visible)
+            val barWidth = size.width / visible
+            for (i in 0 until visible) {
+                val point = waveform.points.getOrNull(start + i) ?: continue
+                val x = i * barWidth
+                val lowH = (point.low / max.toFloat()) * size.height * 0.9f
+                val midH = (point.mid / max.toFloat()) * size.height * 0.7f
+                val highH = (point.high / max.toFloat()) * size.height * 0.5f
+                drawRect(Color(0xFF4A90D9), Offset(x, size.height - lowH), Size(barWidth * 0.9f, lowH))
+                drawRect(Color(0xFF7ED321), Offset(x, size.height - midH), Size(barWidth * 0.6f, midH))
+                drawRect(Color.White, Offset(x + barWidth * 0.25f, size.height - highH), Size(barWidth * 0.3f, highH))
+            }
+            drawLine(Color(0xFFFF4444), Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 2.5f)
         }
     }
 }
