@@ -410,7 +410,9 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
     var gridWriteBusy by remember(media.url) { mutableStateOf(false) }
     var gridWriteStatus by remember(media.url) { mutableStateOf<String?>(null) }
     LaunchedEffect(gridBpm, gridOffsetMs, primeGridBpm, primeGridOffsetMs, gridDraftKey) {
-        val changed = gridOffsetMs != primeGridOffsetMs || (gridBpm != null && primeGridBpm != null && kotlin.math.abs(gridBpm!! - primeGridBpm) > 0.0005)
+        val currentBpm = gridBpm
+        val originalBpm = primeGridBpm
+        val changed = gridOffsetMs != primeGridOffsetMs || (currentBpm != null && originalBpm != null && kotlin.math.abs(currentBpm - originalBpm) > 0.0005)
         gridPreferences.edit().apply {
             if (changed) {
                 gridBpm?.let { putString("$gridDraftKey.bpm", it.toString()) }
