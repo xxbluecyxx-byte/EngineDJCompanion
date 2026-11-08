@@ -23,6 +23,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.enginecompanion.data.*
@@ -78,6 +80,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
     val hasShownLibrary = if (state.remoteActive) state.remoteLibrary != null else state.library != null
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var exportError by remember { mutableStateOf<String?>(null) }
+    var exportText by remember { mutableStateOf("") }
     var showEngineX by remember { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -89,8 +92,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) scope.launch {
             try {
-                val report = state.library?.diagnostics.orEmpty()
-                withContext(Dispatchers.IO) { (context.contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("Exportziel nicht geöffnet")).bufferedWriter().use { it.write(report) } }
+                withContext(Dispatchers.IO) { (context.contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("Exportziel nicht geöffnet")).bufferedWriter().use { it.write(exportText) } }
                 exportError = null
             } catch (e: Exception) { if (e is CancellationException) throw e; exportError = "Export fehlgeschlagen: ${e.message}" }
         }
@@ -266,7 +268,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                 }
                 2 -> {
                     Text("Schema, Primärschlüssel, Fremdschlüssel und Datei-Hashes. Der Export enthält keine Tracklisten, kann aber Dateinamen enthalten.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
-                    OutlinedButton(onClick = { exporter.launch("engine-schema-diagnose.txt") }, enabled = state.library != null) { Text("Diagnose exportieren") }
+                    OutlinedButton(onClick = { exportText = state.library?.diagnostics.orEmpty(); exporter.launch("engine-schema-diagnose.txt") }, enabled = state.library != null) { Text("Diagnose exportieren") }
                     exportError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     SelectionContainer(Modifier.weight(1f).verticalScroll(rememberScrollState())) { Text(state.library?.diagnostics ?: "Nach dem Import erscheint hier der tatsächliche SQLite-Schemabericht.", style = MaterialTheme.typography.bodySmall) }
                 }
@@ -288,7 +290,26 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
             dismissButton = { TextButton(onClick = { showEngineX = false }) { Text("Abbrechen") } }
         )
     }
-    state.details?.let { details -> AlertDialog(onDismissRequest = vm::closeDetails, title = { Text(state.detailTitle, maxLines = 2) }, text = { SelectionContainer { Text(details, modifier = Modifier.verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) } }, confirmButton = { TextButton(onClick = vm::closeDetails) { Text("Schließen") } }) }
+    state.details?.let { details ->
+        Dialog(onDismissRequest = vm::closeDetails, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Scaffold(topBar = {
+                    TopAppBar(
+                        title = { Text(state.detailTitle, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                        navigationIcon = { TextButton(onClick = vm::closeDetails) { Text("Zurück") } },
+                        actions = { TextButton(onClick = {
+                            exportText = details
+                            exporter.launch("engine-track-${state.detailTitle.take(32).replace(Regex("[^A-Za-z0-9._-]"), "_")}.txt")
+                        }) { Text("Export") } }
+                    )
+                }) { detailPadding ->
+                    SelectionContainer(Modifier.fillMaxSize().padding(detailPadding).verticalScroll(rememberScrollState()).padding(18.dp)) {
+                        Text(details, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+    }
 }
 @Composable
 private fun TrackCard(track: Track, enabled: Boolean, click: () -> Unit) {
@@ -297,13 +318,12 @@ private fun TrackCard(track: Track, enabled: Boolean, click: () -> Unit) {
             Text(track.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(listOfNotNull(track.artist, track.album).joinToString(" · ").ifEmpty { "Keine Interpret-/Albumangabe" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${duration(track.seconds)}  ·  ${track.bpm?.let { String.format(Locale.ROOT, "%.1f BPM", it) } ?: "BPM —"}  ·  ${MetadataDisplay.key(track.key)}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                Text("${MetadataDisplay.duration(track.seconds)}  ·  ${MetadataDisplay.bpm(track.bpm)}  ·  ${MetadataDisplay.key(track.key)}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                 Text(MetadataDisplay.rating(track.rating), style = MaterialTheme.typography.labelSmall, maxLines = 1)
             }
         }
     }
 }
-private fun duration(seconds: Double?): String = seconds?.takeIf { it.isFinite() && it >= 0 }?.toLong()?.let { "%d:%02d".format(it / 60, it % 60) } ?: "—:—"
 private fun bytes(value: Long): String {
     if (value < 1024) return "$value B"
     val unit = (ln(value.toDouble()) / ln(1024.0)).toInt().coerceIn(1, 4)

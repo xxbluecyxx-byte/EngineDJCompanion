@@ -1,6 +1,6 @@
 # Validierung — 8. November 2026
 
-Aktueller Entwicklungsstand: `0.3.3-readonly` (Version Code 8). Die unten aufgeführten Build-Ergebnisse stammen aus der Validierung von 0.3.0; 0.3.3 wird nach dem Push durch den Android-CI-Workflow erneut geprüft.
+Aktueller Entwicklungsstand: `0.3.4-readonly` (Version Code 9). Die unten aufgeführten Build-Ergebnisse stammen aus der Validierung von 0.3.0; 0.3.4 wird nach dem Push durch den Android-CI-Workflow erneut geprüft.
 
 ```
 ./gradlew clean assembleDebug testDebugUnitTest lintDebug
@@ -34,6 +34,10 @@ USB- und Backup-Momentaufnahmen erhalten jetzt dieselben direkten und rekursiven
 ## Änderung 0.3.3
 
 Die bestätigte Engine-Tonartskala 0–23 wird in den Trackkarten als Camelot 1A–12B dargestellt. Die Detailansicht ergänzt dazu die musikalische Tonart und behält den Rohwert für die Diagnose. Tracklisten zeigen jetzt „geladen von insgesamt“; lokale SQLite-Suchen verwenden für die Gesamtzahl dieselben Such- und Playlistfilter wie die eigentliche Abfrage.
+
+## Änderung 0.3.4
+
+Trackdetails öffnen als eigene vollflächige Ansicht und formatieren Dauer und BPM konsistent. Der Bericht kann als Textdatei exportiert werden. Bei einer lokalen USB-/Backup-Momentaufnahme enthält er für vorhandene `PerformanceData`-BLOBs ausschließlich Spaltenname, Länge und ein auf 64 Byte begrenztes Hex-Präfix. Diese nachweisbaren Rohdaten bilden die Grundlage für die spätere Cue-/Loop-/Beatgrid-Analyse; es findet noch keine Interpretation oder Änderung statt.
 
 ## Änderung 0.3.0
 

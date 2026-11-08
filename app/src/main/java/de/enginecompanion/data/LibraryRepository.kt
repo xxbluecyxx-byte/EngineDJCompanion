@@ -72,7 +72,14 @@ class LibraryRepository(private val context: Context) {
     }
     fun details(library: Library, track: Track): String = buildString {
         appendLine("Track-ID: ${track.id}")
+        appendLine("Titel: ${track.title}")
+        appendLine("Interpret: ${track.artist ?: "—"}")
+        appendLine("Album: ${track.album ?: "—"}")
+        appendLine("Dauer: ${MetadataDisplay.duration(track.seconds)}")
+        appendLine(MetadataDisplay.bpm(track.bpm))
         appendLine("Tonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})")
+        appendLine("Bewertung: ${MetadataDisplay.rating(track.rating)}")
+        appendLine("\nRohmetadaten:")
         open(File(library.directory, "working/m.db")).use { db ->
             val fields = library.schema.tables["Track"].orEmpty().filterNot { it.type.contains("BLOB", true) }.map { it.name }
             db.rawQuery("SELECT ${fields.joinToString { quote(it) }} FROM Track WHERE id=?", arrayOf(track.id.toString())).use { c -> if (c.moveToFirst()) fields.forEach { appendLine("$it: ${c.text(it) ?: "—"}") } }
@@ -83,12 +90,17 @@ class LibraryRepository(private val context: Context) {
                 val schema = SchemaInspector.inspect(db)
                 if (schema.has("PerformanceData", "trackId") && schema.version == library.schema.version) {
                     val blobs = schema.tables.getValue("PerformanceData").filter { it.type.equals("BLOB", true) }
-                    if (blobs.isNotEmpty()) db.rawQuery("SELECT ${blobs.joinToString { "length(${quote(it.name)})" }} FROM PerformanceData WHERE trackId=?", arrayOf(track.id.toString())).use { c ->
-                        if (c.moveToFirst()) blobs.forEachIndexed { i, col -> appendLine("${file.name} · ${col.name}: ${if (c.isNull(i)) "nicht vorhanden" else "${c.getLong(i)} Bytes"}") }
+                    if (blobs.isNotEmpty()) db.rawQuery("SELECT ${blobs.joinToString { "length(${quote(it.name)}),hex(substr(${quote(it.name)},1,64))" }} FROM PerformanceData WHERE trackId=?", arrayOf(track.id.toString())).use { c ->
+                        if (c.moveToFirst()) blobs.forEachIndexed { i, col ->
+                            val lengthIndex = i * 2
+                            val prefixIndex = lengthIndex + 1
+                            appendLine("${file.name} · ${col.name}: ${if (c.isNull(lengthIndex)) "nicht vorhanden" else "${c.getLong(lengthIndex)} Bytes"}")
+                            if (!c.isNull(prefixIndex) && c.getString(prefixIndex).isNotEmpty()) appendLine("  Präfix (max. 64 Bytes, hex): ${c.getString(prefixIndex)}")
+                        }
                     }
                 }
             }
         }
-        appendLine("\nCue-Zeitpunkte, Loop-Grenzen und Waveforms benötigen weitere Validierung mit echten Daten.")
+        appendLine("\nDie Hex-Präfixe dienen ausschließlich der Formaterkennung. Cue-Zeitpunkte, Loop-Grenzen und Waveforms werden erst nach Vergleich mit bekannten echten Trackdaten dekodiert.")
     }
 }

@@ -190,8 +190,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
             if (state.value.remoteActive) {
                 val remote = state.value.remoteLibrary ?: return@launch
                 val playlistNames = remote.playlistTracks.filterValues { track.id in it }.keys.mapNotNull { id -> remote.playlists.find { it.id == id }?.title }
-                val seconds = track.seconds?.toLong()?.takeIf { it >= 0 }?.let { "%d:%02d".format(it / 60, it % 60) } ?: "—"
-                mutable.update { it.copy(details = "EngineX WLAN · offline verfügbar\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: $seconds\nBPM: ${track.bpm ?: "—"}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}", detailTitle = track.title) }
+                mutable.update { it.copy(details = "EngineX WLAN · offline verfügbar\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: ${MetadataDisplay.duration(track.seconds)}\n${MetadataDisplay.bpm(track.bpm)}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}\n\nFür Cue-/Loop-/Beatgrid-Rohdaten zur USB-Momentaufnahme wechseln und den Track dort öffnen.", detailTitle = track.title) }
                 return@launch
             }
             val library = state.value.library ?: return@launch

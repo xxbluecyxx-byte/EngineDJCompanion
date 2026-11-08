@@ -47,6 +47,7 @@ Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dat
 - Tonarten erscheinen in der Trackliste als Camelot-Code; Details zeigen zusätzlich die musikalische Schreibweise und den unveränderten Rohwert.
 - Tracklisten zeigen geladene und vollständige Trefferzahl getrennt; weitere Ergebnisse werden in 200er-Schritten geladen.
 - Trackdetails einschließlich tatsächlicher Rohmetadaten und PerformanceData-BLOB-Längen.
+- Vollflächige Trackdetails mit exportierbarem, trackbezogenem Analysebericht; BLOBs werden nur mit Länge und maximal 64 Byte Hex-Präfix erfasst.
 - Authentifizierte EngineX-LAN-Erkennung, verschlüsselte Zugangsdaten und private Offline-Momentaufnahme.
 - Wechsel zwischen lokaler USB-Momentaufnahme und EngineX-WLAN-Momentaufnahme.
 - Aufklappbarer Playlist-Baum mit gespeichertem Zustand, visueller Ordner-/Playlist-Unterscheidung, Playlist-Suche und rekursiven Trackzahlen für EngineX- und USB-Momentaufnahmen.
