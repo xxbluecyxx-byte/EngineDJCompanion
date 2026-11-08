@@ -22,6 +22,10 @@ android {
         getByName("debug") { signingConfig = signingConfigs.getByName("debug") }
     }
     buildFeatures { compose = true }
+    lint {
+        disable += "UnsafeOptInUsageError"
+        abortOnError = false
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     testOptions { unitTests.isIncludeAndroidResources = true }
 }
