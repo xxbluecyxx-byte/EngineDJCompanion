@@ -320,12 +320,12 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         state.detailMedia?.let { media ->
-                            WlanPlayer(media, analysis.waveform)
+                            WlanPlayer(media)
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
                         state.detailAnalysis?.let { analysis ->
                             AnalysisOverview(analysis)
-                            
+                            analysis.waveform?.let { DualWaveform(it, 0L, 1L) }
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                             Text("Technischer Bericht", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
@@ -340,7 +340,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun WlanPlayer(media: EngineXTrackMedia, waveform: OverviewWaveform? = null) {
+private fun WlanPlayer(media: EngineXTrackMedia) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember(media.url, media.authorization) {
         val http = DefaultHttpDataSource.Factory()
@@ -375,18 +375,14 @@ private fun WlanPlayer(media: EngineXTrackMedia, waveform: OverviewWaveform? = n
     }
     Text("WLAN Player", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     Text("Audio wird direkt und schreibgeschützt vom Prime gestreamt.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (waveform != null) {
-        DualWaveform(waveform, position, duration)
-    } else {
-        Slider(
-            value = position.coerceAtMost(duration).toFloat(),
-            onValueChange = { position = it.toLong() },
-            onValueChangeFinished = { player.seekTo(position) },
-            valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
-            enabled = ready && duration > 0,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    Slider(
+        value = position.coerceAtMost(duration).toFloat(),
+        onValueChange = { position = it.toLong() },
+        onValueChangeFinished = { player.seekTo(position) },
+        valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+        enabled = ready && duration > 0,
+        modifier = Modifier.fillMaxWidth()
+    )
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(playerTime(position), style = MaterialTheme.typography.labelMedium)
         Text(playerTime(duration), style = MaterialTheme.typography.labelMedium)
