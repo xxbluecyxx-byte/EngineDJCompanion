@@ -13,6 +13,7 @@ class EngineXClientTest {
     @Test fun normalizesPrivatePrimeAddress() {
         assertEquals("http://192.168.178.67:8080", EngineXClient.normalizeBaseUrl("192.168.178.67"))
         assertEquals("http://sc5000.lan:8080", EngineXClient.normalizeBaseUrl("http://sc5000.lan"))
+        assertEquals("http://192.168.178.67:8081", EngineXClient.agentBaseUrl("http://192.168.178.67:8080"))
     }
 
     @Test fun rejectsPublicAndCredentialBearingUrls() {

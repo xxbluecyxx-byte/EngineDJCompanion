@@ -27,7 +27,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import de.enginecompanion.data.*
+import de.enginecompanion.network.EngineXTrackMedia
 import de.enginecompanion.ui.ExplorerViewModel
 import kotlinx.coroutines.*
 import java.util.Locale
@@ -304,6 +310,14 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                     )
                 }) { detailPadding ->
                     Column(Modifier.fillMaxSize().padding(detailPadding).verticalScroll(rememberScrollState()).padding(18.dp)) {
+                        if (state.detailBusy) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        state.detailMedia?.let { media ->
+                            WlanPlayer(media)
+                            HorizontalDivider(Modifier.padding(vertical = 20.dp))
+                        }
                         state.detailAnalysis?.let { analysis ->
                             AnalysisOverview(analysis)
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
@@ -317,6 +331,67 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
         }
     }
 }
+
+@Composable
+private fun WlanPlayer(media: EngineXTrackMedia) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(media.url, media.authorization) {
+        val http = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(mapOf("Authorization" to media.authorization))
+            .setUserAgent("EngineDJCompanion/0.6")
+        ExoPlayer.Builder(context).build().apply {
+            setMediaSource(ProgressiveMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(media.url)))
+            prepare()
+        }
+    }
+    var playing by remember { mutableStateOf(false) }
+    var ready by remember { mutableStateOf(false) }
+    var position by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(value: Boolean) { playing = value }
+            override fun onPlaybackStateChanged(state: Int) {
+                ready = state == Player.STATE_READY
+                duration = player.duration.coerceAtLeast(0L)
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener); player.release() }
+    }
+    LaunchedEffect(player, playing) {
+        while (true) {
+            position = player.currentPosition.coerceAtLeast(0L)
+            duration = player.duration.coerceAtLeast(0L)
+            delay(if (playing) 200 else 500)
+        }
+    }
+    Text("WLAN Player", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Text("Audio wird direkt und schreibgeschützt vom Prime gestreamt.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Slider(
+        value = position.coerceAtMost(duration).toFloat(),
+        onValueChange = { position = it.toLong() },
+        onValueChangeFinished = { player.seekTo(position) },
+        valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+        enabled = ready && duration > 0,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(playerTime(position), style = MaterialTheme.typography.labelMedium)
+        Text(playerTime(duration), style = MaterialTheme.typography.labelMedium)
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+        OutlinedButton(onClick = { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)) }, enabled = ready) { Text("−10 s") }
+        Button(onClick = { if (player.isPlaying) player.pause() else player.play() }, enabled = ready) { Text(if (playing) "Pause" else "Play") }
+        OutlinedButton(onClick = { player.seekTo((player.currentPosition + 10_000).coerceAtMost(duration)) }, enabled = ready) { Text("+10 s") }
+    }
+}
+
+private fun playerTime(milliseconds: Long): String {
+    val seconds = milliseconds.coerceAtLeast(0) / 1000
+    return String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
+}
+
 @Composable
 private fun AnalysisOverview(analysis: TrackAnalysis) {
     val rate = analysis.beatGrid?.sampleRate?.takeIf { it.isFinite() && it > 0 }

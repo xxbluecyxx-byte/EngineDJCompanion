@@ -5,6 +5,9 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import android.util.Base64
+import de.enginecompanion.data.AnalysisDecoder
+import de.enginecompanion.data.TrackAnalysis
 import de.enginecompanion.data.Membership
 import de.enginecompanion.data.Playlist
 import de.enginecompanion.data.PlaylistOrder
@@ -19,6 +22,7 @@ data class EngineXDrive(
 )
 
 data class EngineXConnection(val baseUrl: String, val drives: List<EngineXDrive>)
+data class EngineXTrackMedia(val url: String, val authorization: String)
 data class EngineXSnapshot(
     val drive: String,
     val databaseUuid: String,
@@ -61,6 +65,25 @@ class EngineXClient {
         return parseSnapshot(body)
     }
 
+    fun analysis(host: String, accessCode: String, trackId: Long, drive: String = "Engine"): TrackAnalysis {
+        val driveName = java.net.URLEncoder.encode(drive, Charsets.UTF_8.name())
+        val body = request("${agentBaseUrl(host)}/api/companion/v1/tracks/$trackId/analysis?drive=$driveName", accessCode)
+        val json = org.json.JSONObject(body)
+        require(json.optLong("trackId") == trackId) { "Agent lieferte eine abweichende Track-ID." }
+        fun blob(name: String): ByteArray = json.optString(name).takeIf(String::isNotBlank)
+            ?.let { Base64.decode(it, Base64.DEFAULT) } ?: byteArrayOf()
+        return AnalysisDecoder.decode(blob("beatData"), blob("quickCues"), blob("loops"))
+    }
+
+    fun trackMedia(host: String, accessCode: String, trackId: Long, drive: String = "Engine"): EngineXTrackMedia {
+        require(accessCode.isNotBlank()) { "EngineX-Zugriffscode fehlt." }
+        val driveName = java.net.URLEncoder.encode(drive, Charsets.UTF_8.name())
+        return EngineXTrackMedia(
+            "${agentBaseUrl(host)}/api/companion/v1/tracks/$trackId/audio?drive=$driveName",
+            "Bearer ${accessCode.trim()}"
+        )
+    }
+
     private fun request(url: String, accessCode: String): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"; connectTimeout = 5_000; readTimeout = 60_000
@@ -77,6 +100,11 @@ class EngineXClient {
     }
 
     companion object {
+        fun agentBaseUrl(input: String): String {
+            val engine = URI(normalizeBaseUrl(input))
+            val displayHost = if (':' in engine.host) "[${engine.host}]" else engine.host
+            return "http://$displayHost:8081"
+        }
         fun normalizeBaseUrl(input: String): String {
             val raw = input.trim().removeSuffix("/")
             require(raw.isNotEmpty()) { "Prime-Adresse fehlt." }

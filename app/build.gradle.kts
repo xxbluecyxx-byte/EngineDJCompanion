@@ -6,8 +6,8 @@ android {
         applicationId = "de.enginecompanion"
         minSdk = 28
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.5.1-readonly"
+        versionCode = 14
+        versionName = "0.6.0-readonly"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -33,6 +33,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16")
 }
