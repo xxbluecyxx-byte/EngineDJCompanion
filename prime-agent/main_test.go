@@ -40,3 +40,26 @@ func TestReplaceQuickCuesPreservesTailAndSlots(t *testing.T) {
 	}
 	if !bytes.Equal(decoded[position:], tail) { t.Fatal("main cue tail changed") }
 }
+
+func TestReplaceBeatgridMovesAnchorAndChangesTempo(t *testing.T) {
+	var raw bytes.Buffer
+	_ = binary.Write(&raw, binary.BigEndian, float64(44100))
+	_ = binary.Write(&raw, binary.BigEndian, float64(0))
+	raw.WriteByte(1)
+	_ = binary.Write(&raw, binary.BigEndian, uint64(2))
+	for _, marker := range []rawMarker{{offset: 0, beat: 0, beats: 4, unknown: 11}, {offset: 88200, beat: 4, beats: 0, unknown: 12}} {
+		_ = binary.Write(&raw, binary.LittleEndian, marker.offset); _ = binary.Write(&raw, binary.LittleEndian, marker.beat)
+		_ = binary.Write(&raw, binary.LittleEndian, marker.beats); _ = binary.Write(&raw, binary.LittleEndian, marker.unknown)
+	}
+	_ = binary.Write(&raw, binary.BigEndian, uint64(0))
+	updated, err := replaceBeatgrid(compressQtBlob(raw.Bytes()), 120, 1000)
+	if err != nil { t.Fatal(err) }
+	decoded, err := inflateQtBlob(updated, 1<<20); if err != nil { t.Fatal(err) }
+	position := 17 + 8 + 2*24
+	if got := binary.BigEndian.Uint64(decoded[position:position+8]); got != 2 { t.Fatalf("adjusted marker count = %d", got) }
+	position += 8
+	first := math.Float64frombits(binary.LittleEndian.Uint64(decoded[position:position+8])); position += 24
+	second := math.Float64frombits(binary.LittleEndian.Uint64(decoded[position:position+8]))
+	if first != 44100 { t.Fatalf("first marker = %f", first) }
+	if second != 132300 { t.Fatalf("second marker = %f", second) }
+}

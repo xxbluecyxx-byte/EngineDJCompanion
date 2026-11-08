@@ -41,6 +41,21 @@ data class EngineXSnapshot(
 )
 
 class EngineXClient {
+    fun updateBeatgrid(media: EngineXTrackMedia, bpm: Double, offsetMs: Long): String? {
+        val endpoint = media.url.replace(Regex("/audio(?=\\?)"), "/beatgrid")
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; connectTimeout = 5_000; readTimeout = 120_000; doOutput = true; useCaches = false
+            setRequestProperty("Authorization", media.authorization); setRequestProperty("Accept", "application/json")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        try {
+            connection.outputStream.bufferedWriter().use { it.write(org.json.JSONObject().put("bpm", bpm).put("offsetMs", offsetMs).toString()) }
+            val code = connection.responseCode
+            if (code !in 200..299) throw IOException(connection.errorStream?.bufferedReader()?.use { it.readText() }?.trim().orEmpty().ifBlank { "Agent antwortet mit HTTP $code." })
+            return org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optString("backup").takeIf(String::isNotBlank)
+        } finally { connection.disconnect() }
+    }
+
     fun updateCues(media: EngineXTrackMedia, cues: List<CuePoint>): String? {
         val endpoint = media.url.replace(Regex("/audio(?=\\?)"), "/cues")
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {

@@ -336,6 +336,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                         state.detailMedia?.let { media ->
                             WlanPlayer(media, state.detailTrack, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy) {
                                 vm.syncEngineX(state.remoteLibrary?.drive ?: "Engine")
+                                state.detailTrack?.let(vm::details)
                             }
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
@@ -406,6 +407,8 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
     val playerAnalysis = analysis?.copy(cues = playerCues)
     var gridBpm by remember(media.url, primeGridBpm) { mutableStateOf(gridPreferences.getString("$gridDraftKey.bpm", null)?.toDoubleOrNull() ?: primeGridBpm) }
     var gridOffsetMs by remember(media.url, primeGridBpm) { mutableLongStateOf(gridPreferences.getLong("$gridDraftKey.offset", 0L)) }
+    var gridWriteBusy by remember(media.url) { mutableStateOf(false) }
+    var gridWriteStatus by remember(media.url) { mutableStateOf<String?>(null) }
     LaunchedEffect(gridBpm, gridOffsetMs, primeGridBpm, gridDraftKey) {
         val changed = gridOffsetMs != 0L || (gridBpm != null && primeGridBpm != null && kotlin.math.abs(gridBpm!! - primeGridBpm) > 0.0005)
         gridPreferences.edit().apply {
@@ -523,6 +526,8 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             gridBpm = gridBpm,
             primeGridBpm = primeGridBpm,
             gridOffsetMs = gridOffsetMs,
+            gridWriteBusy = gridWriteBusy,
+            gridWriteStatus = gridWriteStatus,
             playheadMs = position,
             cuesChanged = cuesChanged,
             cueWriteBusy = cueWriteBusy,
@@ -626,7 +631,18 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             onQuantize = { quantizeEnabled = it },
             onGridBpm = { gridBpm = it.coerceIn(20.0, 400.0) },
             onGridOffset = { gridOffsetMs = it.coerceIn(-30_000L, 30_000L) },
-            onGridReset = { gridBpm = primeGridBpm; gridOffsetMs = 0L }
+            onGridReset = { gridBpm = primeGridBpm; gridOffsetMs = 0L },
+            onApplyGrid = {
+                gridBpm?.let { bpm ->
+                    gridWriteBusy = true; gridWriteStatus = "Beatgrid wird gesichert und übertragen …"
+                    scope.launch {
+                        runCatching { withContext(Dispatchers.IO) { EngineXClient().updateBeatgrid(media, bpm, gridOffsetMs) } }
+                            .onSuccess { backup -> gridOffsetMs = 0L; gridWriteStatus = "Beatgrid auf Prime gespeichert · Sicherung: ${backup?.substringAfterLast('/') ?: "vorhanden"}"; onLibraryChanged() }
+                            .onFailure { gridWriteStatus = "Beatgrid-Übertragung fehlgeschlagen: ${it.message}" }
+                        gridWriteBusy = false
+                    }
+                }
+            }
         )
     }
 }
@@ -639,6 +655,8 @@ private fun PlayerPerformancePads(
     gridBpm: Double?,
     primeGridBpm: Double?,
     gridOffsetMs: Long,
+    gridWriteBusy: Boolean,
+    gridWriteStatus: String?,
     playheadMs: Long,
     cuesChanged: Boolean,
     cueWriteBusy: Boolean,
@@ -672,7 +690,8 @@ private fun PlayerPerformancePads(
     onQuantize: (Boolean) -> Unit,
     onGridBpm: (Double) -> Unit,
     onGridOffset: (Long) -> Unit,
-    onGridReset: () -> Unit
+    onGridReset: () -> Unit,
+    onApplyGrid: () -> Unit
 ) {
     var selectedTool by rememberSaveable { mutableIntStateOf(0) }
     SecondaryTabRow(selectedTabIndex = selectedTool, modifier = Modifier.padding(top = 16.dp)) {
@@ -687,9 +706,12 @@ private fun PlayerPerformancePads(
             primeBpm = primeGridBpm,
             offsetMs = gridOffsetMs,
             playheadMs = playheadMs,
+            writeBusy = gridWriteBusy,
+            writeStatus = gridWriteStatus,
             onBpm = onGridBpm,
             onOffset = onGridOffset,
-            onReset = onGridReset
+            onReset = onGridReset,
+            onApply = onApplyGrid
         )
         return
     }
@@ -846,9 +868,12 @@ private fun BeatgridControls(
     primeBpm: Double?,
     offsetMs: Long,
     playheadMs: Long,
+    writeBusy: Boolean,
+    writeStatus: String?,
     onBpm: (Double) -> Unit,
     onOffset: (Long) -> Unit,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    onApply: () -> Unit
 ) {
     val grid = analysis.beatGrid
     val markers = grid?.let { it.adjustedMarkers.ifEmpty { it.defaultMarkers } }.orEmpty()
@@ -904,10 +929,13 @@ private fun BeatgridControls(
             enabled = firstMarker != null && rate != null && bpm != null,
             modifier = Modifier.fillMaxWidth()
         ) { Text("Beat auf Playhead setzen · ${playerTime(playheadMs)}") }
+        val changed = offsetMs != 0L || (bpm != null && primeBpm != null && kotlin.math.abs(bpm - primeBpm) > 0.0005)
+        Button(onClick = onApply, enabled = changed && !writeBusy, modifier = Modifier.fillMaxWidth()) { Text(if (writeBusy) "Beatgrid übertragen …" else "Beatgrid auf Prime übertragen") }
+        writeStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Beatgrid-Übertragung fehlgeschlagen")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary) }
         markers.take(4).forEachIndexed { index, marker ->
             Text("Marker ${index + 1}: ${analysisPosition(marker.sampleOffset, grid?.sampleRate)} · Beat ${marker.beatNumber}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text("Änderungen gelten aktuell nur für diesen Player und werden nicht zum Prime geschrieben.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Änderungen bleiben lokal, bis du sie mit dem Button auf den Prime überträgst.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

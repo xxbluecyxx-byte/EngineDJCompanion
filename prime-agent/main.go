@@ -30,7 +30,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 5
+	agentVersion  = 6
 )
 
 type drive struct {
@@ -83,6 +83,7 @@ type cueInput struct {
 }
 
 type cuesRequest struct { Cues []cueInput `json:"cues"` }
+type beatgridRequest struct { BPM float64 `json:"bpm"`; OffsetMS int64 `json:"offsetMs"` }
 
 var safeDriveName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var safeCueColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
@@ -161,10 +162,85 @@ func (s *server) track(w http.ResponseWriter, r *http.Request) {
 		s.metadata(w, r, d, trackID)
 	case "cues":
 		s.cues(w, r, d, trackID)
+	case "beatgrid":
+		s.beatgrid(w, r, d, trackID)
 	default:
 		http.NotFound(w, r)
 	}
 }
+
+func (s *server) beatgrid(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	var input beatgridRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || math.IsNaN(input.BPM) || math.IsInf(input.BPM, 0) || input.BPM < 20 || input.BPM > 400 || input.OffsetMS < -30000 || input.OffsetMS > 30000 {
+		http.Error(w, "invalid beatgrid", http.StatusBadRequest); return
+	}
+	backup, err := s.backupLibrary(r, d.db, r.URL.Query().Get("drive"))
+	if err != nil { http.Error(w, "backup failed: "+err.Error(), http.StatusServiceUnavailable); return }
+	dsn := (&url.URL{Scheme: "file", Path: d.db, RawQuery: "mode=rw&_pragma=busy_timeout(5000)"}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil { http.Error(w, "library write open failed", http.StatusServiceUnavailable); return }
+	defer db.Close(); db.SetMaxOpenConns(1)
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil { http.Error(w, "library busy", http.StatusConflict); return }
+	var current []byte
+	if err = tx.QueryRowContext(r.Context(), `SELECT beatData FROM PerformanceData WHERE trackId=?`, trackID).Scan(&current); err != nil { _ = tx.Rollback(); http.Error(w, "beatgrid unavailable", http.StatusNotFound); return }
+	updated, err := replaceBeatgrid(current, input.BPM, input.OffsetMS)
+	if err != nil { _ = tx.Rollback(); http.Error(w, "beatgrid format rejected: "+err.Error(), http.StatusUnprocessableEntity); return }
+	if _, err = tx.ExecContext(r.Context(), `UPDATE PerformanceData SET beatData=? WHERE trackId=?`, updated, trackID); err == nil {
+		_, err = tx.ExecContext(r.Context(), `UPDATE Track SET isPerfomanceDataOfPackedTrackChanged=1,lastEditTime=? WHERE id=?`, time.Now().Unix(), trackID)
+	}
+	if err != nil { _ = tx.Rollback(); http.Error(w, "beatgrid update failed", http.StatusInternalServerError); return }
+	if err = tx.Commit(); err != nil { http.Error(w, "beatgrid commit failed", http.StatusInternalServerError); return }
+	writeJSON(w, map[string]any{"trackId": trackID, "bpm": input.BPM, "offsetMs": input.OffsetMS, "backup": backup})
+}
+
+type rawMarker struct { offset float64; beat int64; beats int32; unknown int32 }
+
+func replaceBeatgrid(blob []byte, bpm float64, offsetMS int64) ([]byte, error) {
+	raw, err := inflateQtBlob(blob, 1<<20)
+	if err != nil || len(raw) < 17 { return nil, errors.New("invalid beatgrid blob") }
+	rate := math.Float64frombits(binary.BigEndian.Uint64(raw[:8]))
+	if !isFinite(rate) || rate <= 0 { return nil, errors.New("invalid sample rate") }
+	position := 17
+	readMarkers := func() ([]rawMarker, error) {
+		if position+8 > len(raw) { return nil, errors.New("truncated marker count") }
+		count := int(binary.BigEndian.Uint64(raw[position:position+8])); position += 8
+		if count < 0 || count > 10000 || position+count*24 > len(raw) { return nil, errors.New("invalid marker count") }
+		markers := make([]rawMarker, count)
+		for index := range markers {
+			markers[index] = rawMarker{math.Float64frombits(binary.LittleEndian.Uint64(raw[position:position+8])), int64(binary.LittleEndian.Uint64(raw[position+8:position+16])), int32(binary.LittleEndian.Uint32(raw[position+16:position+20])), int32(binary.LittleEndian.Uint32(raw[position+20:position+24]))}
+			position += 24
+		}
+		return markers, nil
+	}
+	defaults, err := readMarkers(); if err != nil { return nil, err }
+	adjusted, err := readMarkers(); if err != nil { return nil, err }
+	tail := append([]byte(nil), raw[position:]...)
+	selected := adjusted; if len(selected) == 0 { selected = defaults }
+	if len(selected) == 0 { return nil, errors.New("no markers") }
+	anchor := selected[0]
+	newAnchor := anchor.offset + float64(offsetMS)*rate/1000.0
+	newAdjusted := make([]rawMarker, len(selected))
+	for index, marker := range selected {
+		marker.offset = newAnchor + float64(marker.beat-anchor.beat)*60.0/bpm*rate
+		newAdjusted[index] = marker
+	}
+	var output bytes.Buffer
+	header := append([]byte(nil), raw[:17]...); header[16] = 1; output.Write(header)
+	writeMarkers := func(markers []rawMarker) {
+		_ = binary.Write(&output, binary.BigEndian, uint64(len(markers)))
+		for _, marker := range markers {
+			_ = binary.Write(&output, binary.LittleEndian, marker.offset); _ = binary.Write(&output, binary.LittleEndian, marker.beat)
+			_ = binary.Write(&output, binary.LittleEndian, marker.beats); _ = binary.Write(&output, binary.LittleEndian, marker.unknown)
+		}
+	}
+	writeMarkers(defaults); writeMarkers(newAdjusted); output.Write(tail)
+	return compressQtBlob(output.Bytes()), nil
+}
+
+func isFinite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }
 
 func (s *server) cues(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
 	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
@@ -200,13 +276,27 @@ func (s *server) cues(w http.ResponseWriter, r *http.Request, d drive, trackID i
 
 type rawCue struct { label []byte; offset float64; unknown byte; red, green, blue byte }
 
-func replaceQuickCues(blob []byte, requested []cueInput) ([]byte, error) {
+func inflateQtBlob(blob []byte, limit int64) ([]byte, error) {
 	if len(blob) < 6 { return nil, errors.New("blob too short") }
 	expected := binary.BigEndian.Uint32(blob[:4])
+	if int64(expected) > limit { return nil, errors.New("blob too large") }
 	reader, err := zlib.NewReader(bytes.NewReader(blob[4:]))
 	if err != nil { return nil, err }
-	raw, err := io.ReadAll(io.LimitReader(reader, 1<<20)); reader.Close()
-	if err != nil || len(raw) != int(expected) || len(raw) < 8 { return nil, errors.New("invalid compressed length") }
+	raw, err := io.ReadAll(io.LimitReader(reader, limit+1)); reader.Close()
+	if err != nil || len(raw) != int(expected) { return nil, errors.New("invalid compressed length") }
+	return raw, nil
+}
+
+func compressQtBlob(raw []byte) []byte {
+	var compressed bytes.Buffer
+	_ = binary.Write(&compressed, binary.BigEndian, uint32(len(raw)))
+	zw := zlib.NewWriter(&compressed); _, _ = zw.Write(raw); _ = zw.Close()
+	return compressed.Bytes()
+}
+
+func replaceQuickCues(blob []byte, requested []cueInput) ([]byte, error) {
+	raw, err := inflateQtBlob(blob, 1<<20)
+	if err != nil || len(raw) < 8 { return nil, errors.New("invalid compressed length") }
 	count := int(binary.BigEndian.Uint64(raw[:8]))
 	if count < 0 || count > 64 { return nil, errors.New("invalid cue count") }
 	position := 8
@@ -237,10 +327,7 @@ func replaceQuickCues(blob []byte, requested []cueInput) ([]byte, error) {
 		uncompressed.Write([]byte{cue.unknown, cue.red, cue.green, cue.blue})
 	}
 	uncompressed.Write(tail)
-	var compressed bytes.Buffer
-	_ = binary.Write(&compressed, binary.BigEndian, uint32(uncompressed.Len()))
-	zw := zlib.NewWriter(&compressed); _, _ = zw.Write(uncompressed.Bytes()); _ = zw.Close()
-	return compressed.Bytes(), nil
+	return compressQtBlob(uncompressed.Bytes()), nil
 }
 
 func (s *server) metadata(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
