@@ -372,6 +372,11 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     val primeGridBpm = analysis?.beatGrid?.let(AnalysisDecoder::estimatedBpm)
     val gridPreferences = remember(context) { context.getSharedPreferences("beatgrid-drafts", 0) }
     val gridDraftKey = remember(media.url) { (media.url.hashCode().toLong() and 0xffffffffL).toString(16) }
+    val cuePreferences = remember(context) { context.getSharedPreferences("hot-cue-drafts", 0) }
+    val primeCues = analysis?.cues.orEmpty()
+    var playerCues by remember(media.url, primeCues) { mutableStateOf(readCueDraft(cuePreferences.getString(gridDraftKey, null), primeCues)) }
+    val cuesChanged = playerCues != primeCues
+    val playerAnalysis = analysis?.copy(cues = playerCues)
     var gridBpm by remember(media.url, primeGridBpm) { mutableStateOf(gridPreferences.getString("$gridDraftKey.bpm", null)?.toDoubleOrNull() ?: primeGridBpm) }
     var gridOffsetMs by remember(media.url, primeGridBpm) { mutableLongStateOf(gridPreferences.getLong("$gridDraftKey.offset", 0L)) }
     LaunchedEffect(gridBpm, gridOffsetMs, primeGridBpm, gridDraftKey) {
@@ -384,6 +389,11 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
                 remove("$gridDraftKey.bpm")
                 remove("$gridDraftKey.offset")
             }
+        }.apply()
+    }
+    LaunchedEffect(playerCues, primeCues, gridDraftKey) {
+        cuePreferences.edit().apply {
+            if (playerCues != primeCues) putString(gridDraftKey, writeCueDraft(playerCues)) else remove(gridDraftKey)
         }.apply()
     }
     DisposableEffect(player) {
@@ -421,7 +431,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     }
     Text("WLAN Player", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     Text("Audio wird direkt und schreibgeschützt vom Prime gestreamt.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    analysis?.waveform?.let { waveform ->
+    playerAnalysis?.waveform?.let { waveform ->
         val seek: (Long) -> Unit = { requested ->
             val target = requested.coerceIn(0L, duration.coerceAtLeast(0L))
             position = target
@@ -430,7 +440,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
         PlayerWaveforms(
             overviewWaveform = waveform,
             detailedWaveform = detailedWaveform,
-            analysis = analysis,
+            analysis = playerAnalysis,
             positionMs = position,
             durationMs = duration,
             detailLoading = waveformBusy,
@@ -452,7 +462,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
         Button(onClick = { if (player.isPlaying) player.pause() else player.play() }, enabled = ready) { Text(if (playing) "Pause" else "Play") }
         OutlinedButton(onClick = { player.seekTo((player.currentPosition + 10_000).coerceAtMost(duration)) }, enabled = ready) { Text("+10 s") }
     }
-    analysis?.let { currentAnalysis ->
+    playerAnalysis?.let { currentAnalysis ->
         PlayerPerformancePads(
             analysis = currentAnalysis,
             activeLoopNumber = activeLoopNumber,
@@ -460,6 +470,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             primeGridBpm = primeGridBpm,
             gridOffsetMs = gridOffsetMs,
             playheadMs = position,
+            cuesChanged = cuesChanged,
             enabled = ready,
             onCue = { samples ->
                 sampleRate?.let { rate ->
@@ -484,6 +495,15 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
                     }
                 }
             },
+            onSetCue = { number ->
+                sampleRate?.let { rate ->
+                    val colors = listOf("#F4D338", "#EF8130", "#3D9BFF", "#36D67E", "#E85DAD", "#38D9D9", "#9B72FF", "#EF5350")
+                    val cue = CuePoint(number, "Cue $number", position / 1000.0 * rate, colors[(number - 1).coerceIn(0, colors.lastIndex)])
+                    playerCues = (playerCues.filterNot { it.number == number } + cue).sortedBy(CuePoint::number)
+                }
+            },
+            onDeleteCue = { number -> playerCues = playerCues.filterNot { it.number == number } },
+            onResetCues = { playerCues = primeCues },
             onGridBpm = { gridBpm = it.coerceIn(20.0, 400.0) },
             onGridOffset = { gridOffsetMs = it.coerceIn(-30_000L, 30_000L) },
             onGridReset = { gridBpm = primeGridBpm; gridOffsetMs = 0L }
@@ -500,9 +520,13 @@ private fun PlayerPerformancePads(
     primeGridBpm: Double?,
     gridOffsetMs: Long,
     playheadMs: Long,
+    cuesChanged: Boolean,
     enabled: Boolean,
     onCue: (Double) -> Unit,
     onLoop: (SavedLoop) -> Unit,
+    onSetCue: (Int) -> Unit,
+    onDeleteCue: (Int) -> Unit,
+    onResetCues: () -> Unit,
     onGridBpm: (Double) -> Unit,
     onGridOffset: (Long) -> Unit,
     onGridReset: () -> Unit
@@ -525,6 +549,18 @@ private fun PlayerPerformancePads(
         )
         return
     }
+    var cueMode by rememberSaveable { mutableIntStateOf(0) }
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf("Auslösen", "Setzen", "Löschen").forEachIndexed { index, label ->
+            FilterChip(selected = cueMode == index, onClick = { cueMode = index }, label = { Text(label) }, modifier = Modifier.weight(1f))
+        }
+    }
+    if (cuesChanged) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("Lokaler Cue-Entwurf", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium)
+            TextButton(onClick = onResetCues) { Text("Prime-Cues") }
+        }
+    }
     val cues = analysis.cues.associateBy(CuePoint::number)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         repeat(2) { row ->
@@ -534,8 +570,14 @@ private fun PlayerPerformancePads(
                     val cue = cues[number]
                     val accent = cue?.let { analysisColor(it.color) } ?: MaterialTheme.colorScheme.surfaceVariant
                     Button(
-                        onClick = { cue?.let { onCue(it.sampleOffset) } },
-                        enabled = enabled && cue != null,
+                        onClick = {
+                            when (cueMode) {
+                                1 -> onSetCue(number)
+                                2 -> onDeleteCue(number)
+                                else -> cue?.let { onCue(it.sampleOffset) }
+                            }
+                        },
+                        enabled = enabled && (cue != null || cueMode == 1),
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = accent.copy(alpha = 0.78f))
@@ -634,6 +676,32 @@ private fun BeatgridControls(
         Text("Änderungen gelten aktuell nur für diesen Player und werden nicht zum Prime geschrieben.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+private fun readCueDraft(json: String?, fallback: List<CuePoint>): List<CuePoint> = runCatching {
+    if (json.isNullOrBlank()) fallback else {
+        val array = org.json.JSONArray(json)
+        (0 until array.length()).map { index ->
+            val item = array.getJSONObject(index)
+            CuePoint(
+                number = item.getInt("number").also { require(it in 1..8) },
+                label = item.optString("label"),
+                sampleOffset = item.getDouble("sampleOffset").also { require(it.isFinite() && it >= 0) },
+                color = item.optString("color", "#F4D338")
+            )
+        }.distinctBy(CuePoint::number).sortedBy(CuePoint::number)
+    }
+}.getOrDefault(fallback)
+
+private fun writeCueDraft(cues: List<CuePoint>): String = org.json.JSONArray().apply {
+    cues.sortedBy(CuePoint::number).forEach { cue ->
+        put(org.json.JSONObject().apply {
+            put("number", cue.number)
+            put("label", cue.label)
+            put("sampleOffset", cue.sampleOffset)
+            put("color", cue.color)
+        })
+    }
+}.toString()
 
 private fun sampleToMs(samples: Double, sampleRate: Double): Long = (samples / sampleRate * 1000.0).toLong().coerceAtLeast(0L)
 
