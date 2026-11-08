@@ -32,6 +32,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.common.util.UnstableApi
 import de.enginecompanion.data.*
 import de.enginecompanion.network.EngineXTrackMedia
 import de.enginecompanion.ui.ExplorerViewModel
@@ -332,6 +333,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 private fun WlanPlayer(media: EngineXTrackMedia) {
     val context = androidx.compose.ui.platform.LocalContext.current
