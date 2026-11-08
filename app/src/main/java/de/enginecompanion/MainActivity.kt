@@ -3,6 +3,9 @@ package de.enginecompanion
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.Path as AndroidPath
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -28,6 +31,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -371,9 +379,16 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?) {
     }
     LaunchedEffect(player, playing) {
         while (true) {
-            position = player.currentPosition.coerceAtLeast(0L)
-            duration = player.duration.coerceAtLeast(0L)
-            delay(if (playing) 16 else 100)
+            if (playing) {
+                withFrameNanos {
+                    position = player.currentPosition.coerceAtLeast(0L)
+                    duration = player.duration.coerceAtLeast(0L)
+                }
+            } else {
+                position = player.currentPosition.coerceAtLeast(0L)
+                duration = player.duration.coerceAtLeast(0L)
+                delay(100)
+            }
         }
     }
     Text("WLAN Player", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -510,6 +525,9 @@ private fun PlayerWaveforms(
     val endIndex = startIndex + visible
     val rate = analysis.beatGrid?.sampleRate?.takeIf { it > 0 && it.isFinite() }
     val latestPosition by rememberUpdatedState(positionMs)
+    val raster by produceState<ImageBitmap?>(null, waveform) {
+        value = withContext(Dispatchers.Default) { renderWaveform(waveform) }
+    }
 
     Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
         Canvas(
@@ -523,12 +541,15 @@ private fun PlayerWaveforms(
                     )
                 }
         ) {
-            val step = total.toFloat() / size.width.coerceAtLeast(1f)
-            var x = 0f
-            while (x < size.width) {
-                val point = waveform.points[(x * step).toInt().coerceIn(0, total - 1)]
-                drawFrequencyBar(x, size.height / 2f, size.height * 0.46f, point, waveform)
-                x += 1.35f
+            raster?.let { image ->
+                drawImage(
+                    image = image,
+                    srcOffset = IntOffset.Zero,
+                    srcSize = IntSize(image.width, image.height),
+                    dstOffset = IntOffset.Zero,
+                    dstSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1)),
+                    filterQuality = FilterQuality.Low
+                )
             }
             analysis.cues.forEach { cue ->
                 val cueMs = if (rate != null) cue.sampleOffset / rate * 1000.0 else return@forEach
@@ -555,7 +576,6 @@ private fun PlayerWaveforms(
                 }
         ) {
             val count = (endIndex - startIndex).coerceAtLeast(1)
-            val px = size.width / count
             val windowStartMs = startIndex.toDouble() / total * safeDuration.toDouble()
             val windowEndMs = endIndex.toDouble() / total * safeDuration.toDouble()
             val grid = analysis.beatGrid
@@ -573,10 +593,21 @@ private fun PlayerWaveforms(
                     n++
                 }
             }
-            for (i in startIndex until endIndex) {
-                val point = waveform.points.getOrNull(i) ?: continue
-                val x = (i - startIndex + 0.5f) * px
-                drawFrequencyBar(x, size.height / 2f, size.height * 0.47f, point, waveform)
+            raster?.let { image ->
+                val sourceStart = startIndex.coerceAtLeast(0)
+                val sourceEnd = endIndex.coerceAtMost(total)
+                if (sourceEnd > sourceStart) {
+                    val destinationStart = ((sourceStart - startIndex).toFloat() / count * size.width).toInt()
+                    val destinationWidth = ((sourceEnd - sourceStart).toFloat() / count * size.width).toInt().coerceAtLeast(1)
+                    drawImage(
+                        image = image,
+                        srcOffset = IntOffset(sourceStart, 0),
+                        srcSize = IntSize(sourceEnd - sourceStart, image.height),
+                        dstOffset = IntOffset(destinationStart, 0),
+                        dstSize = IntSize(destinationWidth, size.height.toInt().coerceAtLeast(1)),
+                        filterQuality = FilterQuality.Low
+                    )
+                }
             }
             analysis.cues.forEach { cue ->
                 val cueMs = if (rate != null) cue.sampleOffset / rate * 1000.0 else return@forEach
@@ -592,17 +623,42 @@ private fun PlayerWaveforms(
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFrequencyBar(
-    x: Float,
-    centerY: Float,
-    maxHeight: Float,
-    point: WaveformPoint,
-    waveform: OverviewWaveform
-) {
-    val low = point.low / waveform.maxLow.coerceAtLeast(1).toFloat() * maxHeight
-    val mid = point.mid / waveform.maxMid.coerceAtLeast(1).toFloat() * maxHeight
-    val high = point.high / waveform.maxHigh.coerceAtLeast(1).toFloat() * maxHeight
-    drawLine(Color(0xFF0877C9), Offset(x, centerY - low), Offset(x, centerY + low), 2.2f)
-    drawLine(Color(0xFF22E56F), Offset(x, centerY - mid), Offset(x, centerY + mid), 1.7f)
-    drawLine(Color(0xFFE9FFFF), Offset(x, centerY - high), Offset(x, centerY + high), 1.0f)
+private fun renderWaveform(waveform: OverviewWaveform): ImageBitmap {
+    val width = waveform.points.size.coerceAtLeast(1)
+    val height = 256
+    val center = height / 2f
+    val extent = height * 0.48f
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+
+    fun normalized(value: Int, maximum: Int): Float =
+        (value.toDouble() / maximum.coerceAtLeast(1)).coerceIn(0.0, 1.0).pow(0.58).toFloat()
+
+    val outer = FloatArray(width)
+    val middle = FloatArray(width)
+    val core = FloatArray(width)
+    waveform.points.forEachIndexed { index, point ->
+        val low = normalized(point.low, waveform.maxLow)
+        val mid = normalized(point.mid, waveform.maxMid)
+        val high = normalized(point.high, waveform.maxHigh)
+        outer[index] = maxOf(low, mid, high) * extent
+        middle[index] = maxOf(low * 0.78f, mid * 0.9f) * extent
+        core[index] = maxOf(low * 0.38f, high * 0.32f) * extent
+    }
+
+    fun area(amplitudes: FloatArray): AndroidPath = AndroidPath().apply {
+        moveTo(0f, center - amplitudes[0])
+        for (x in 1 until width) lineTo(x.toFloat(), center - amplitudes[x])
+        for (x in width - 1 downTo 0) lineTo(x.toFloat(), center + amplitudes[x])
+        close()
+    }
+    fun paint(color: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        style = Paint.Style.FILL
+    }
+
+    canvas.drawPath(area(outer), paint(android.graphics.Color.rgb(0, 126, 230)))
+    canvas.drawPath(area(middle), paint(android.graphics.Color.rgb(25, 232, 101)))
+    canvas.drawPath(area(core), paint(android.graphics.Color.rgb(229, 255, 255)))
+    return bitmap.asImageBitmap()
 }
