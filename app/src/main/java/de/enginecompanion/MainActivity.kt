@@ -332,7 +332,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         state.detailMedia?.let { media ->
-                            WlanPlayer(media, state.detailAnalysis)
+                            WlanPlayer(media, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy)
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
                         state.detailAnalysis?.let { analysis ->
@@ -351,7 +351,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?) {
+private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember(media.url, media.authorization) {
         val http = DefaultHttpDataSource.Factory()
@@ -400,12 +400,14 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?) {
             player.seekTo(target)
         }
         PlayerWaveforms(
-            waveform = waveform,
+            overviewWaveform = waveform,
+            detailedWaveform = detailedWaveform,
             analysis = analysis,
             positionMs = position,
             durationMs = duration,
             onSeek = seek
         )
+        if (waveformBusy) Text("Detail-Waveform wird einmalig aus dem Audio berechnet …", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
     } ?: Surface(
         Modifier.fillMaxWidth().height(150.dp).padding(top = 10.dp),
         color = Color(0xFF05090D),
@@ -510,13 +512,14 @@ private fun bytes(value: Long): String {
 
 @Composable
 private fun PlayerWaveforms(
-    waveform: OverviewWaveform,
+    overviewWaveform: OverviewWaveform,
+    detailedWaveform: OverviewWaveform?,
     analysis: TrackAnalysis,
     positionMs: Long,
     durationMs: Long,
     onSeek: (Long) -> Unit
 ) {
-    val total = waveform.points.size
+    val total = detailedWaveform?.points?.size ?: overviewWaveform.points.size
     val safeDuration = durationMs.coerceAtLeast(1L)
     val progress = (positionMs.toFloat() / safeDuration).coerceIn(0f, 1f)
     val visible = minOf(total, (total * 0.04f).toInt().coerceAtLeast(48))
@@ -525,8 +528,11 @@ private fun PlayerWaveforms(
     val endIndex = startIndex + visible
     val rate = analysis.beatGrid?.sampleRate?.takeIf { it > 0 && it.isFinite() }
     val latestPosition by rememberUpdatedState(positionMs)
-    val raster by produceState<ImageBitmap?>(null, waveform) {
-        value = withContext(Dispatchers.Default) { renderWaveform(waveform) }
+    val overviewRaster by produceState<ImageBitmap?>(null, overviewWaveform) {
+        value = withContext(Dispatchers.Default) { renderWaveform(overviewWaveform) }
+    }
+    val detailRaster by produceState<ImageBitmap?>(null, detailedWaveform) {
+        value = detailedWaveform?.let { withContext(Dispatchers.Default) { renderWaveform(it) } }
     }
 
     Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
@@ -541,7 +547,7 @@ private fun PlayerWaveforms(
                     )
                 }
         ) {
-            raster?.let { image ->
+            overviewRaster?.let { image ->
                 drawImage(
                     image = image,
                     srcOffset = IntOffset.Zero,
@@ -593,7 +599,7 @@ private fun PlayerWaveforms(
                     n++
                 }
             }
-            raster?.let { image ->
+            detailRaster?.let { image ->
                 val sourceStart = startIndex.coerceAtLeast(0)
                 val sourceEnd = endIndex.coerceAtMost(total)
                 if (sourceEnd > sourceStart) {

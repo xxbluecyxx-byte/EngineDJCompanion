@@ -31,7 +31,8 @@ data class ExplorerState(
     val query: String = "", val sort: String = "Titel", val playlist: Long? = null,
     val limit: Int = 200, val totalMatches: Int = 0, val details: String? = null, val detailAnalysis: TrackAnalysis? = null,
     val detailTitle: String = "", val detailTrack: Track? = null, val detailMedia: EngineXTrackMedia? = null,
-    val detailBusy: Boolean = false, val querying: Boolean = false
+    val detailBusy: Boolean = false, val detailWaveform: OverviewWaveform? = null,
+    val detailWaveformBusy: Boolean = false, val querying: Boolean = false
 )
 class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = LibraryRepository(app)
@@ -42,6 +43,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     private val engineXClient = EngineXClient()
     private val engineXSecrets = EngineXSecretStore(app)
     private val engineXCache = EngineXSnapshotCache(app)
+    private val highResolutionWaveform = HighResolutionWaveform(app)
     private val mutable = MutableStateFlow(ExplorerState(busy = true, progress = "Lokale Bibliothek laden …"))
     val state = mutable.asStateFlow()
     private var importJob: Job? = null
@@ -187,19 +189,27 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     fun sort(value: String) { mutable.update { it.copy(sort = value, limit = 200) }; refresh() }
     fun playlist(id: Long?) { mutable.update { it.copy(playlist = id, sort = if (id == null) "Titel" else "Playlist", limit = 200) }; refresh() }
     fun more() { mutable.update { it.copy(limit = (it.limit + 200).coerceAtMost(100000)) }; refresh() }
-    fun closeDetails() { mutable.update { it.copy(details = null, detailAnalysis = null, detailTrack = null, detailMedia = null, detailBusy = false) } }
+    fun closeDetails() { mutable.update { it.copy(details = null, detailAnalysis = null, detailTrack = null, detailMedia = null, detailBusy = false, detailWaveform = null, detailWaveformBusy = false) } }
     fun details(track: Track) { viewModelScope.launch {
         try {
             if (state.value.remoteActive) {
                 val remote = state.value.remoteLibrary ?: return@launch
                 val playlistNames = remote.playlistTracks.filterValues { track.id in it }.keys.mapNotNull { id -> remote.playlists.find { it.id == id }?.title }
                 val report = "EngineX WLAN · Live vom Prime\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: ${MetadataDisplay.duration(track.seconds)}\n${MetadataDisplay.bpm(track.bpm)}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}"
-                mutable.update { it.copy(details = report, detailAnalysis = null, detailTitle = track.title, detailTrack = track, detailBusy = true) }
+                mutable.update { it.copy(details = report, detailAnalysis = null, detailTitle = track.title, detailTrack = track, detailBusy = true, detailWaveform = null, detailWaveformBusy = false) }
                 val code = engineXSecrets.accessCode() ?: throw SecurityException("EngineX-Zugriffscode fehlt.")
                 try {
                     val analysis = withContext(Dispatchers.IO) { engineXClient.analysis(engineXSecrets.host(), code, track.id, remote.drive) }
                     val media = engineXClient.trackMedia(engineXSecrets.host(), code, track.id, remote.drive)
-                    mutable.update { it.copy(detailAnalysis = analysis, detailMedia = media, detailBusy = false) }
+                    mutable.update { it.copy(detailAnalysis = analysis, detailMedia = media, detailBusy = false, detailWaveformBusy = true) }
+                    try {
+                        val detailed = withContext(Dispatchers.IO) { highResolutionWaveform.loadOrCreate(track.id, media) }
+                        if (state.value.detailTrack?.id == track.id) mutable.update { it.copy(detailWaveform = detailed, detailWaveformBusy = false) }
+                    } catch (e: Exception) {
+                        if (state.value.detailTrack?.id == track.id) mutable.update {
+                            it.copy(details = "$report\n\nDetail-Waveform konnte nicht berechnet werden: ${e.message}", detailWaveformBusy = false)
+                        }
+                    }
                 } catch (e: Exception) {
                     mutable.update { it.copy(details = "$report\n\nPerformance-Daten konnten nicht über WLAN geladen werden: ${e.message}", detailBusy = false) }
                 }
@@ -207,7 +217,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
             }
             val library = state.value.library ?: return@launch
             val result = withContext(Dispatchers.IO) { mutex.withLock { if (state.value.library != library) null else repository.details(library, track) } }
-            if (result != null && state.value.library == library) mutable.update { it.copy(details = result.text, detailAnalysis = result.analysis, detailTitle = track.title, detailTrack = track, detailMedia = null) }
+            if (result != null && state.value.library == library) mutable.update { it.copy(details = result.text, detailAnalysis = result.analysis, detailTitle = track.title, detailTrack = track, detailMedia = null, detailWaveform = null, detailWaveformBusy = false) }
         } catch (e: Exception) { fail(e) }
     } }
     private fun refresh(debounce: Boolean = false) {
