@@ -12,6 +12,7 @@ import de.enginecompanion.data.Membership
 import de.enginecompanion.data.Playlist
 import de.enginecompanion.data.PlaylistOrder
 import de.enginecompanion.data.Track
+import de.enginecompanion.data.CuePoint
 
 data class EngineXDrive(
     val name: String,
@@ -40,6 +41,24 @@ data class EngineXSnapshot(
 )
 
 class EngineXClient {
+    fun updateCues(media: EngineXTrackMedia, cues: List<CuePoint>): String? {
+        val endpoint = media.url.replace(Regex("/audio(?=\\?)"), "/cues")
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; connectTimeout = 5_000; readTimeout = 120_000; doOutput = true; useCaches = false
+            setRequestProperty("Authorization", media.authorization); setRequestProperty("Accept", "application/json")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        try {
+            val payload = org.json.JSONObject().put("cues", org.json.JSONArray().apply { cues.sortedBy(CuePoint::number).forEach { cue ->
+                put(org.json.JSONObject().put("number", cue.number).put("label", cue.label).put("sampleOffset", cue.sampleOffset).put("color", cue.color))
+            } })
+            connection.outputStream.bufferedWriter().use { it.write(payload.toString()) }
+            val code = connection.responseCode
+            if (code !in 200..299) throw IOException(connection.errorStream?.bufferedReader()?.use { it.readText() }?.trim().orEmpty().ifBlank { "Agent antwortet mit HTTP $code." })
+            return org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optString("backup").takeIf(String::isNotBlank)
+        } finally { connection.disconnect() }
+    }
+
     fun metadata(media: EngineXTrackMedia): TrackMetadata = metadataRequest(media, null)
 
     fun updateMetadata(media: EngineXTrackMedia, value: TrackMetadata): TrackMetadata = metadataRequest(media, value)

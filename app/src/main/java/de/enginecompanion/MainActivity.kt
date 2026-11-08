@@ -334,7 +334,9 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         state.detailMedia?.let { media ->
-                            WlanPlayer(media, state.detailTrack, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy)
+                            WlanPlayer(media, state.detailTrack, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy) {
+                                vm.syncEngineX(state.remoteLibrary?.drive ?: "Engine")
+                            }
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
                         state.detailAnalysis?.let { analysis ->
@@ -353,7 +355,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean) {
+private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean, onLibraryChanged: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val player = remember(media.url, media.authorization) {
@@ -379,8 +381,10 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
     val cuePreferences = remember(context) { context.getSharedPreferences("hot-cue-drafts", 0) }
     val tagPreferences = remember(context) { context.getSharedPreferences("tag-drafts", 0) }
     val queuePreferences = remember(context) { context.getSharedPreferences("tag-write-queue", 0) }
-    val primeCues = analysis?.cues.orEmpty()
+    var primeCues by remember(media.url, analysis?.cues) { mutableStateOf(analysis?.cues.orEmpty()) }
     var playerCues by remember(media.url, primeCues) { mutableStateOf(readCueDraft(cuePreferences.getString(gridDraftKey, null), primeCues)) }
+    var cueWriteBusy by remember(media.url) { mutableStateOf(false) }
+    var cueWriteStatus by remember(media.url) { mutableStateOf<String?>(null) }
     var tagTitle by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.title", null) ?: track?.title.orEmpty()) }
     var tagArtist by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.artist", null) ?: track?.artist.orEmpty()) }
     var tagAlbum by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.album", null) ?: track?.album.orEmpty()) }
@@ -521,6 +525,8 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             gridOffsetMs = gridOffsetMs,
             playheadMs = position,
             cuesChanged = cuesChanged,
+            cueWriteBusy = cueWriteBusy,
+            cueWriteStatus = cueWriteStatus,
             track = track,
             tagTitle = tagTitle,
             tagArtist = tagArtist,
@@ -575,6 +581,15 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             },
             onDeleteCue = { number -> playerCues = playerCues.filterNot { it.number == number } },
             onResetCues = { playerCues = primeCues },
+            onApplyCues = {
+                cueWriteBusy = true; cueWriteStatus = "Cues werden gesichert und übertragen …"
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { EngineXClient().updateCues(media, playerCues) } }
+                        .onSuccess { backup -> primeCues = playerCues; cueWriteStatus = "Cues auf Prime gespeichert · Sicherung: ${backup?.substringAfterLast('/') ?: "vorhanden"}"; onLibraryChanged() }
+                        .onFailure { cueWriteStatus = "Cue-Übertragung fehlgeschlagen: ${it.message}" }
+                    cueWriteBusy = false
+                }
+            },
             onTags = { title, artist, album, genre, comment, label, remixer, rating -> tagTitle = title; tagArtist = artist; tagAlbum = album; tagGenre = genre; tagComment = comment; tagLabel = label; tagRemixer = remixer; tagRating = rating },
             onResetTags = { tagTitle = primeTitle; tagArtist = primeArtist; tagAlbum = primeAlbum; tagGenre = primeMetadata?.genre.orEmpty(); tagComment = primeMetadata?.comment.orEmpty(); tagLabel = primeMetadata?.label.orEmpty(); tagRemixer = primeMetadata?.remixer.orEmpty(); tagRating = primeRating },
             onQueueTags = {
@@ -603,7 +618,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
                             remaining = remaining.filterNot { it.trackId == queued.trackId }
                             pendingTagWrites = remaining
                         }
-                        if (remaining.isEmpty()) tagWriteStatus = "Alle Änderungen gespeichert · Sicherung: ${lastBackup?.substringAfterLast('/') ?: "erstellt"}"
+                        if (remaining.isEmpty()) { tagWriteStatus = "Alle Änderungen gespeichert · Sicherung: ${lastBackup?.substringAfterLast('/') ?: "erstellt"}"; onLibraryChanged() }
                         tagWriteBusy = false
                     }
                 }
@@ -626,6 +641,8 @@ private fun PlayerPerformancePads(
     gridOffsetMs: Long,
     playheadMs: Long,
     cuesChanged: Boolean,
+    cueWriteBusy: Boolean,
+    cueWriteStatus: String?,
     track: Track?,
     tagTitle: String,
     tagArtist: String,
@@ -646,6 +663,7 @@ private fun PlayerPerformancePads(
     onSetCue: (Int, Boolean) -> Unit,
     onDeleteCue: (Int) -> Unit,
     onResetCues: () -> Unit,
+    onApplyCues: () -> Unit,
     onTags: (String, String, String, String, String, String, String, Int) -> Unit,
     onResetTags: () -> Unit,
     onQueueTags: () -> Unit,
@@ -690,11 +708,15 @@ private fun PlayerPerformancePads(
         }
     }
     if (cuesChanged) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Text("Lokaler Cue-Entwurf", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium)
-            TextButton(onClick = onResetCues) { Text("Prime-Cues") }
+        Column(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Lokaler Cue-Entwurf", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium)
+                TextButton(onClick = onResetCues, enabled = !cueWriteBusy) { Text("Prime-Cues") }
+            }
+            Button(onClick = onApplyCues, enabled = !cueWriteBusy, modifier = Modifier.fillMaxWidth()) { Text(if (cueWriteBusy) "Cues übertragen …" else "Cues auf Prime übertragen") }
         }
     }
+    cueWriteStatus?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = if (it.startsWith("Cue-Übertragung fehlgeschlagen")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary) }
     val cues = analysis.cues.associateBy(CuePoint::number)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         repeat(2) { row ->

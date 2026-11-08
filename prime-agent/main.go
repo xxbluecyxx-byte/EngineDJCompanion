@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"compress/zlib"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -25,7 +30,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 4
+	agentVersion  = 5
 )
 
 type drive struct {
@@ -70,7 +75,17 @@ type metadataResponse struct {
 	Backup string `json:"backup,omitempty"`
 }
 
+type cueInput struct {
+	Number int `json:"number"`
+	Label string `json:"label"`
+	SampleOffset float64 `json:"sampleOffset"`
+	Color string `json:"color"`
+}
+
+type cuesRequest struct { Cues []cueInput `json:"cues"` }
+
 var safeDriveName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var safeCueColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
 func main() {
 	s := &server{drives: allowedDrives, tokenFile: tokenPath, semaphore: make(chan struct{}, 2), backups: make(map[string]string)}
@@ -144,9 +159,88 @@ func (s *server) track(w http.ResponseWriter, r *http.Request) {
 		s.audio(w, r, d, trackID)
 	case "metadata":
 		s.metadata(w, r, d, trackID)
+	case "cues":
+		s.cues(w, r, d, trackID)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *server) cues(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var input cuesRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil { http.Error(w, "invalid cues", http.StatusBadRequest); return }
+	seen := make(map[int]bool)
+	for _, cue := range input.Cues {
+		if cue.Number < 1 || cue.Number > 8 || seen[cue.Number] || len([]byte(cue.Label)) > 255 || cue.SampleOffset < 0 || !safeCueColor.MatchString(cue.Color) {
+			http.Error(w, "invalid cue", http.StatusBadRequest); return
+		}
+		seen[cue.Number] = true
+	}
+	backup, err := s.backupLibrary(r, d.db, r.URL.Query().Get("drive"))
+	if err != nil { http.Error(w, "backup failed: "+err.Error(), http.StatusServiceUnavailable); return }
+	dsn := (&url.URL{Scheme: "file", Path: d.db, RawQuery: "mode=rw&_pragma=busy_timeout(5000)"}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil { http.Error(w, "library write open failed", http.StatusServiceUnavailable); return }
+	defer db.Close(); db.SetMaxOpenConns(1)
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil { http.Error(w, "library busy", http.StatusConflict); return }
+	var current []byte
+	if err = tx.QueryRowContext(r.Context(), `SELECT quickCues FROM PerformanceData WHERE trackId=?`, trackID).Scan(&current); err != nil { _ = tx.Rollback(); http.Error(w, "quick cues unavailable", http.StatusNotFound); return }
+	updated, err := replaceQuickCues(current, input.Cues)
+	if err != nil { _ = tx.Rollback(); http.Error(w, "quick cues format rejected: "+err.Error(), http.StatusUnprocessableEntity); return }
+	if _, err = tx.ExecContext(r.Context(), `UPDATE PerformanceData SET quickCues=? WHERE trackId=?`, updated, trackID); err == nil {
+		_, err = tx.ExecContext(r.Context(), `UPDATE Track SET isPerfomanceDataOfPackedTrackChanged=1,lastEditTime=? WHERE id=?`, time.Now().Unix(), trackID)
+	}
+	if err != nil { _ = tx.Rollback(); http.Error(w, "cue update failed", http.StatusInternalServerError); return }
+	if err = tx.Commit(); err != nil { http.Error(w, "cue commit failed", http.StatusInternalServerError); return }
+	writeJSON(w, map[string]any{"trackId": trackID, "cueCount": len(input.Cues), "backup": backup})
+}
+
+type rawCue struct { label []byte; offset float64; unknown byte; red, green, blue byte }
+
+func replaceQuickCues(blob []byte, requested []cueInput) ([]byte, error) {
+	if len(blob) < 6 { return nil, errors.New("blob too short") }
+	expected := binary.BigEndian.Uint32(blob[:4])
+	reader, err := zlib.NewReader(bytes.NewReader(blob[4:]))
+	if err != nil { return nil, err }
+	raw, err := io.ReadAll(io.LimitReader(reader, 1<<20)); reader.Close()
+	if err != nil || len(raw) != int(expected) || len(raw) < 8 { return nil, errors.New("invalid compressed length") }
+	count := int(binary.BigEndian.Uint64(raw[:8]))
+	if count < 0 || count > 64 { return nil, errors.New("invalid cue count") }
+	position := 8
+	existing := make([]rawCue, count)
+	for index := 0; index < count; index++ {
+		if position >= len(raw) { return nil, errors.New("truncated label") }
+		length := int(raw[position]); position++
+		if position+length+12 > len(raw) { return nil, errors.New("truncated cue") }
+		existing[index] = rawCue{append([]byte(nil), raw[position:position+length]...), math.Float64frombits(binary.BigEndian.Uint64(raw[position+length:position+length+8])), raw[position+length+8], raw[position+length+9], raw[position+length+10], raw[position+length+11]}
+		position += length + 12
+	}
+	tail := append([]byte(nil), raw[position:]...)
+	for len(existing) < 8 { existing = append(existing, rawCue{offset: -1, unknown: 255}) }
+	byNumber := make(map[int]cueInput)
+	for _, cue := range requested { byNumber[cue.Number] = cue }
+	for index := 0; index < 8; index++ {
+		if cue, ok := byNumber[index+1]; ok {
+			color, _ := strconv.ParseUint(strings.TrimPrefix(cue.Color, "#"), 16, 24)
+			existing[index].label = []byte(cue.Label); existing[index].offset = cue.SampleOffset
+			existing[index].red, existing[index].green, existing[index].blue = byte(color>>16), byte(color>>8), byte(color)
+		} else { existing[index].label = nil; existing[index].offset = -1; existing[index].red, existing[index].green, existing[index].blue = 0, 0, 0 }
+	}
+	var uncompressed bytes.Buffer
+	_ = binary.Write(&uncompressed, binary.BigEndian, uint64(len(existing)))
+	for _, cue := range existing {
+		uncompressed.WriteByte(byte(len(cue.label))); uncompressed.Write(cue.label)
+		_ = binary.Write(&uncompressed, binary.BigEndian, cue.offset)
+		uncompressed.Write([]byte{cue.unknown, cue.red, cue.green, cue.blue})
+	}
+	uncompressed.Write(tail)
+	var compressed bytes.Buffer
+	_ = binary.Write(&compressed, binary.BigEndian, uint32(uncompressed.Len()))
+	zw := zlib.NewWriter(&compressed); _, _ = zw.Write(uncompressed.Bytes()); _ = zw.Close()
+	return compressed.Bytes(), nil
 }
 
 func (s *server) metadata(w http.ResponseWriter, r *http.Request, d drive, trackID int64) {
