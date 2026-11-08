@@ -10,6 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -322,6 +325,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                         }
                         state.detailAnalysis?.let { analysis ->
                             AnalysisOverview(analysis)
+                            analysis.waveform?.let { OverviewWaveformView(it) }
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                             Text("Technischer Bericht", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
@@ -474,4 +478,21 @@ private fun bytes(value: Long): String {
     if (value < 1024) return "$value B"
     val unit = (ln(value.toDouble()) / ln(1024.0)).toInt().coerceIn(1, 4)
     return String.format(Locale.ROOT, "%.1f %s", value / 1024.0.pow(unit), listOf("KiB", "MiB", "GiB", "TiB")[unit - 1])
+}
+
+@Composable
+private fun OverviewWaveformView(waveform: OverviewWaveform) {
+    val max = maxOf(waveform.maxLow, waveform.maxMid, waveform.maxHigh, 1)
+    Canvas(Modifier.fillMaxWidth().height(80.dp)) {
+        val barWidth = size.width / waveform.points.size
+        waveform.points.forEachIndexed { i, point ->
+            val x = i * barWidth
+            val lowH = (point.low / max.toFloat()) * size.height
+            val midH = (point.mid / max.toFloat()) * size.height
+            val highH = (point.high / max.toFloat()) * size.height
+            drawRect(Color(0xFF4A90D9), Offset(x, size.height - lowH), Size(barWidth * 0.9f, lowH))
+            drawRect(Color(0xFF7ED321), Offset(x, size.height - midH), Size(barWidth * 0.6f, midH))
+            drawRect(Color.White, Offset(x + barWidth * 0.2f, size.height - highH), Size(barWidth * 0.3f, highH))
+        }
+    }
 }

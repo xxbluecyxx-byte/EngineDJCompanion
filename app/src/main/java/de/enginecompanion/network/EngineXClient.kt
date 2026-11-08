@@ -72,7 +72,7 @@ class EngineXClient {
         require(json.optLong("trackId") == trackId) { "Agent lieferte eine abweichende Track-ID." }
         fun blob(name: String): ByteArray = json.optString(name).takeIf(String::isNotBlank)
             ?.let { Base64.decode(it, Base64.DEFAULT) } ?: byteArrayOf()
-        return AnalysisDecoder.decode(blob("beatData"), blob("quickCues"), blob("loops"))
+        return AnalysisDecoder.decode(blob("beatData"), blob("quickCues"), blob("loops"), blob("overviewWaveformData"))
     }
 
     fun trackMedia(host: String, accessCode: String, trackId: Long, drive: String = "Engine"): EngineXTrackMedia {
