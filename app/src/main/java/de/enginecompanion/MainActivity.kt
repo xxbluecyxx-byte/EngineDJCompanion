@@ -378,6 +378,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
     val gridDraftKey = remember(media.url) { (media.url.hashCode().toLong() and 0xffffffffL).toString(16) }
     val cuePreferences = remember(context) { context.getSharedPreferences("hot-cue-drafts", 0) }
     val tagPreferences = remember(context) { context.getSharedPreferences("tag-drafts", 0) }
+    val queuePreferences = remember(context) { context.getSharedPreferences("tag-write-queue", 0) }
     val primeCues = analysis?.cues.orEmpty()
     var playerCues by remember(media.url, primeCues) { mutableStateOf(readCueDraft(cuePreferences.getString(gridDraftKey, null), primeCues)) }
     var tagTitle by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.title", null) ?: track?.title.orEmpty()) }
@@ -391,6 +392,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
     var primeMetadata by remember(media.url) { mutableStateOf<TrackMetadata?>(null) }
     var tagWriteStatus by remember(media.url) { mutableStateOf<String?>(null) }
     var tagWriteBusy by remember(media.url) { mutableStateOf(false) }
+    var pendingTagWrites by remember { mutableStateOf(readTagWriteQueue(queuePreferences.getString("queue", null))) }
     val primeTitle = primeMetadata?.title ?: track?.title.orEmpty()
     val primeArtist = primeMetadata?.artist ?: track?.artist.orEmpty()
     val primeAlbum = primeMetadata?.album ?: track?.album.orEmpty()
@@ -439,6 +441,9 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
                 remove("$gridDraftKey.title"); remove("$gridDraftKey.artist"); remove("$gridDraftKey.album"); remove("$gridDraftKey.genre"); remove("$gridDraftKey.comment"); remove("$gridDraftKey.label"); remove("$gridDraftKey.remixer"); remove("$gridDraftKey.rating")
             }
         }.apply()
+    }
+    LaunchedEffect(pendingTagWrites) {
+        queuePreferences.edit().putString("queue", writeTagWriteQueue(pendingTagWrites)).apply()
     }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -528,6 +533,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             tagsChanged = tagsChanged,
             tagWriteBusy = tagWriteBusy,
             tagWriteStatus = tagWriteStatus,
+            pendingTagWrites = pendingTagWrites,
             quantizeEnabled = quantizeEnabled,
             enabled = ready,
             onCue = { samples ->
@@ -571,13 +577,33 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
             onResetCues = { playerCues = primeCues },
             onTags = { title, artist, album, genre, comment, label, remixer, rating -> tagTitle = title; tagArtist = artist; tagAlbum = album; tagGenre = genre; tagComment = comment; tagLabel = label; tagRemixer = remixer; tagRating = rating },
             onResetTags = { tagTitle = primeTitle; tagArtist = primeArtist; tagAlbum = primeAlbum; tagGenre = primeMetadata?.genre.orEmpty(); tagComment = primeMetadata?.comment.orEmpty(); tagLabel = primeMetadata?.label.orEmpty(); tagRemixer = primeMetadata?.remixer.orEmpty(); tagRating = primeRating },
-            onApplyTags = {
+            onQueueTags = {
                 track?.let { selected ->
-                    tagWriteBusy = true; tagWriteStatus = "Sicherung und Transaktion laufen …"
+                    val before = primeMetadata ?: TrackMetadata(selected.id, primeTitle, primeArtist, primeAlbum, "", "", "", "", primeRating)
+                    val after = TrackMetadata(selected.id, tagTitle, tagArtist, tagAlbum, tagGenre, tagComment, tagLabel, tagRemixer, tagRating)
+                    pendingTagWrites = (pendingTagWrites.filterNot { it.trackId == selected.id } + PendingTagWrite(selected.id, gridDraftKey, before, after)).sortedBy(PendingTagWrite::title)
+                    tagWriteStatus = "Zur Warteschlange hinzugefügt"
+                }
+            },
+            onRemoveQueuedTag = { id -> pendingTagWrites = pendingTagWrites.filterNot { it.trackId == id } },
+            onApplyTagQueue = {
+                if (pendingTagWrites.isNotEmpty()) {
+                    tagWriteBusy = true
                     scope.launch {
-                        runCatching { withContext(Dispatchers.IO) { EngineXClient().updateMetadata(media, TrackMetadata(selected.id, tagTitle, tagArtist, tagAlbum, tagGenre, tagComment, tagLabel, tagRemixer, tagRating)) } }
-                            .onSuccess { saved -> primeMetadata = saved; tagWriteStatus = "Auf Prime gespeichert · Sicherung: ${saved.backup?.substringAfterLast('/') ?: "erstellt"}" }
-                            .onFailure { tagWriteStatus = "Schreiben fehlgeschlagen: ${it.message}" }
+                        var remaining = pendingTagWrites
+                        var lastBackup: String? = null
+                        for ((index, queued) in pendingTagWrites.withIndex()) {
+                            tagWriteStatus = "${index + 1} von ${pendingTagWrites.size}: ${queued.title}"
+                            val queuedMedia = media.copy(url = media.url.replace(Regex("/tracks/\\d+/audio"), "/tracks/${queued.trackId}/audio"))
+                            val result = runCatching { withContext(Dispatchers.IO) { EngineXClient().updateMetadata(queuedMedia, queued.after) } }
+                            if (result.isFailure) { tagWriteStatus = "Schreiben fehlgeschlagen bei ${queued.title}: ${result.exceptionOrNull()?.message}"; break }
+                            val saved = result.getOrThrow(); lastBackup = saved.backup ?: lastBackup
+                            if (queued.trackId == track?.id) primeMetadata = saved
+                            clearTagDraft(tagPreferences, queued.draftKey)
+                            remaining = remaining.filterNot { it.trackId == queued.trackId }
+                            pendingTagWrites = remaining
+                        }
+                        if (remaining.isEmpty()) tagWriteStatus = "Alle Änderungen gespeichert · Sicherung: ${lastBackup?.substringAfterLast('/') ?: "erstellt"}"
                         tagWriteBusy = false
                     }
                 }
@@ -612,6 +638,7 @@ private fun PlayerPerformancePads(
     tagsChanged: Boolean,
     tagWriteBusy: Boolean,
     tagWriteStatus: String?,
+    pendingTagWrites: List<PendingTagWrite>,
     quantizeEnabled: Boolean,
     enabled: Boolean,
     onCue: (Double) -> Unit,
@@ -621,7 +648,9 @@ private fun PlayerPerformancePads(
     onResetCues: () -> Unit,
     onTags: (String, String, String, String, String, String, String, Int) -> Unit,
     onResetTags: () -> Unit,
-    onApplyTags: () -> Unit,
+    onQueueTags: () -> Unit,
+    onRemoveQueuedTag: (Long) -> Unit,
+    onApplyTagQueue: () -> Unit,
     onQuantize: (Boolean) -> Unit,
     onGridBpm: (Double) -> Unit,
     onGridOffset: (Long) -> Unit,
@@ -647,7 +676,7 @@ private fun PlayerPerformancePads(
         return
     }
     if (selectedTool == 2) {
-        TrackTagEditor(track, tagTitle, tagArtist, tagAlbum, tagGenre, tagComment, tagLabel, tagRemixer, tagRating, tagsChanged, tagWriteBusy, tagWriteStatus, onTags, onResetTags, onApplyTags)
+        TrackTagEditor(track, tagTitle, tagArtist, tagAlbum, tagGenre, tagComment, tagLabel, tagRemixer, tagRating, tagsChanged, tagWriteBusy, tagWriteStatus, pendingTagWrites, onTags, onResetTags, onQueueTags, onRemoveQueuedTag, onApplyTagQueue)
         return
     }
     var cueMode by rememberSaveable { mutableIntStateOf(0) }
@@ -724,9 +753,12 @@ private fun TrackTagEditor(
     changed: Boolean,
     writeBusy: Boolean,
     writeStatus: String?,
+    pendingWrites: List<PendingTagWrite>,
     onChange: (String, String, String, String, String, String, String, Int) -> Unit,
     onReset: () -> Unit,
-    onApply: () -> Unit
+    onQueue: () -> Unit,
+    onRemoveQueued: (Long) -> Unit,
+    onApplyQueue: () -> Unit
 ) {
     var confirmWrite by remember { mutableStateOf(false) }
     fun change(newTitle: String = title, newArtist: String = artist, newAlbum: String = album, newGenre: String = genre, newComment: String = comment, newLabel: String = label, newRemixer: String = remixer, newRating: Int = rating) =
@@ -734,8 +766,8 @@ private fun TrackTagEditor(
     if (confirmWrite) AlertDialog(
         onDismissRequest = { confirmWrite = false },
         title = { Text("Track auf dem Prime ändern?") },
-        text = { Text("Vor dem Update wird eine vollständige SQLite-Sicherung erstellt. Engine OS kann Metadaten im Speicher zwischenspeichern; deshalb testen wir zunächst nur diesen einen Track.") },
-        confirmButton = { TextButton(onClick = { confirmWrite = false; onApply() }) { Text("Sichern und anwenden") } },
+        text = { Text("${pendingWrites.size} vorgemerkte Tracks werden nacheinander geschrieben. Agent v4 verwendet dafür eine geprüfte Ausgangssicherung.") },
+        confirmButton = { TextButton(onClick = { confirmWrite = false; onApplyQueue() }) { Text("Alle anwenden") } },
         dismissButton = { TextButton(onClick = { confirmWrite = false }) { Text("Abbrechen") } }
     )
     Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -763,9 +795,24 @@ private fun TrackTagEditor(
             }
         }
         Text("${rating / 20} von 5 Sternen", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(onClick = { confirmWrite = true }, enabled = changed && !writeBusy && title.isNotBlank() && track != null, modifier = Modifier.fillMaxWidth()) { Text(if (writeBusy) "Sicherung läuft …" else "Auf Prime anwenden") }
+        Button(onClick = onQueue, enabled = changed && !writeBusy && title.isNotBlank() && track != null, modifier = Modifier.fillMaxWidth()) { Text("Änderung vormerken") }
+        if (pendingWrites.isNotEmpty()) {
+            Text("Warteschlange (${pendingWrites.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            pendingWrites.forEach { pending ->
+                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(pending.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                            Text("${pending.changedFields} Felder geändert", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick = { onRemoveQueued(pending.trackId) }, enabled = !writeBusy) { Text("Entfernen") }
+                    }
+                }
+            }
+            Button(onClick = { confirmWrite = true }, enabled = !writeBusy, modifier = Modifier.fillMaxWidth()) { Text(if (writeBusy) "Übertragung läuft …" else "${pendingWrites.size} Änderungen anwenden") }
+        }
         writeStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Schreiben fehlgeschlagen") || it.startsWith("Metadaten-Agent")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary) }
-        Text("Schreibtest für genau diesen Track. Vor jeder Transaktion wird m.db nach Database2/CompanionBackups gesichert.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Agent v4 verarbeitet die Warteschlange mit einer geprüften Ausgangssicherung pro Sitzung.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (track == null) Text("Für diesen Track sind keine WLAN-Metadaten verfügbar.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
 }
@@ -840,6 +887,47 @@ private fun BeatgridControls(
         }
         Text("Änderungen gelten aktuell nur für diesen Player und werden nicht zum Prime geschrieben.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+private data class PendingTagWrite(val trackId: Long, val draftKey: String, val before: TrackMetadata, val after: TrackMetadata) {
+    val title: String get() = after.title
+    val changedFields: Int get() = listOf(
+        before.title != after.title, before.artist != after.artist, before.album != after.album,
+        before.genre != after.genre, before.comment != after.comment, before.label != after.label,
+        before.remixer != after.remixer, before.rating != after.rating
+    ).count { it }
+}
+
+private fun metadataJSON(value: TrackMetadata) = org.json.JSONObject().apply {
+    put("trackId", value.trackId); put("title", value.title); put("artist", value.artist); put("album", value.album)
+    put("genre", value.genre); put("comment", value.comment); put("label", value.label); put("remixer", value.remixer); put("rating", value.rating)
+}
+
+private fun metadataFromJSON(value: org.json.JSONObject) = TrackMetadata(
+    value.getLong("trackId"), value.optString("title"), value.optString("artist"), value.optString("album"),
+    value.optString("genre"), value.optString("comment"), value.optString("label"), value.optString("remixer"), value.optInt("rating")
+)
+
+private fun readTagWriteQueue(json: String?): List<PendingTagWrite> = runCatching {
+    if (json.isNullOrBlank()) emptyList() else {
+        val array = org.json.JSONArray(json)
+        (0 until array.length()).map { index ->
+            val item = array.getJSONObject(index)
+            PendingTagWrite(item.getLong("trackId"), item.getString("draftKey"), metadataFromJSON(item.getJSONObject("before")), metadataFromJSON(item.getJSONObject("after")))
+        }.distinctBy(PendingTagWrite::trackId)
+    }
+}.getOrDefault(emptyList())
+
+private fun writeTagWriteQueue(queue: List<PendingTagWrite>): String = org.json.JSONArray().apply {
+    queue.forEach { pending -> put(org.json.JSONObject().apply {
+        put("trackId", pending.trackId); put("draftKey", pending.draftKey)
+        put("before", metadataJSON(pending.before)); put("after", metadataJSON(pending.after))
+    }) }
+}.toString()
+
+private fun clearTagDraft(preferences: android.content.SharedPreferences, key: String) {
+    preferences.edit().remove("$key.title").remove("$key.artist").remove("$key.album").remove("$key.genre")
+        .remove("$key.comment").remove("$key.label").remove("$key.remixer").remove("$key.rating").apply()
 }
 
 private fun readCueDraft(json: String?, fallback: List<CuePoint>): List<CuePoint> = runCatching {
