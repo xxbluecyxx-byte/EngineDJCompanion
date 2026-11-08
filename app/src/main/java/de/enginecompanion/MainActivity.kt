@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.*
@@ -23,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -320,12 +322,11 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         state.detailMedia?.let { media ->
-                            WlanPlayer(media)
+                            WlanPlayer(media, state.detailAnalysis)
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
                         state.detailAnalysis?.let { analysis ->
                             AnalysisOverview(analysis)
-                            analysis.waveform?.let { DualWaveform(it, 0L, 1L) }
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                             Text("Technischer Bericht", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
@@ -340,7 +341,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun WlanPlayer(media: EngineXTrackMedia) {
+private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember(media.url, media.authorization) {
         val http = DefaultHttpDataSource.Factory()
@@ -375,14 +376,19 @@ private fun WlanPlayer(media: EngineXTrackMedia) {
     }
     Text("WLAN Player", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     Text("Audio wird direkt und schreibgeschützt vom Prime gestreamt.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Slider(
-        value = position.coerceAtMost(duration).toFloat(),
-        onValueChange = { position = it.toLong() },
-        onValueChangeFinished = { player.seekTo(position) },
-        valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
-        enabled = ready && duration > 0,
-        modifier = Modifier.fillMaxWidth()
-    )
+    analysis?.waveform?.let { waveform ->
+        PlayerWaveforms(
+            waveform = waveform,
+            analysis = analysis,
+            positionMs = position,
+            durationMs = duration,
+            onSeek = player::seekTo
+        )
+    } ?: Surface(
+        Modifier.fillMaxWidth().height(150.dp).padding(top = 10.dp),
+        color = Color(0xFF05090D),
+        shape = RoundedCornerShape(10.dp)
+    ) { Box(contentAlignment = androidx.compose.ui.Alignment.Center) { Text("Waveform wird geladen …", color = Color(0xFF78909C)) } }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(playerTime(position), style = MaterialTheme.typography.labelMedium)
         Text(playerTime(duration), style = MaterialTheme.typography.labelMedium)
@@ -481,44 +487,105 @@ private fun bytes(value: Long): String {
 }
 
 @Composable
-private fun DualWaveform(
+private fun PlayerWaveforms(
     waveform: OverviewWaveform,
+    analysis: TrackAnalysis,
     positionMs: Long,
-    durationMs: Long
+    durationMs: Long,
+    onSeek: (Long) -> Unit
 ) {
-    val max = maxOf(waveform.maxLow, waveform.maxMid, waveform.maxHigh, 1)
-    val progress = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
-    val zoom = 0.08f
+    val total = waveform.points.size
+    val safeDuration = durationMs.coerceAtLeast(1L)
+    val progress = (positionMs.toFloat() / safeDuration).coerceIn(0f, 1f)
+    val visible = minOf(total, (total * 0.12f).toInt().coerceAtLeast(48))
+    val centerIndex = (progress * (total - 1)).toInt()
+    val startIndex = (centerIndex - visible / 2).coerceIn(0, (total - visible).coerceAtLeast(0))
+    val endIndex = (startIndex + visible).coerceAtMost(total)
+    val rate = analysis.beatGrid?.sampleRate?.takeIf { it > 0 && it.isFinite() }
 
-    Column(Modifier.fillMaxWidth()) {
-        Canvas(Modifier.fillMaxWidth().height(48.dp)) {
-            val barWidth = size.width / waveform.points.size
-            waveform.points.forEachIndexed { i, point ->
-                val x = i * barWidth
-                val h = (maxOf(point.low, point.mid, point.high) / max.toFloat()) * size.height
-                drawRect(Color(0xFF2A5A8A), Offset(x, size.height - h), Size(barWidth * 0.85f, h))
+    Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+        Canvas(
+            Modifier.fillMaxWidth().height(62.dp)
+                .background(Color(0xFF04090D), RoundedCornerShape(8.dp))
+                .pointerInput(safeDuration) {
+                    detectTapGestures { tap ->
+                        onSeek((tap.x / size.width.toFloat() * safeDuration.toFloat()).toLong().coerceIn(0L, safeDuration))
+                    }
+                }
+        ) {
+            val step = total.toFloat() / size.width.coerceAtLeast(1f)
+            var x = 0f
+            while (x < size.width) {
+                val point = waveform.points[(x * step).toInt().coerceIn(0, total - 1)]
+                drawFrequencyBar(x, size.height / 2f, size.height * 0.46f, point, waveform)
+                x += 1.35f
             }
-            val playX = progress * size.width
-            drawLine(Color.White, Offset(playX, 0f), Offset(playX, size.height), 2f)
-        }
-        Spacer(Modifier.height(4.dp))
-        Canvas(Modifier.fillMaxWidth().height(96.dp)) {
-            val total = waveform.points.size
-            val visible = (total * zoom).toInt().coerceAtLeast(32)
-            val center = (progress * total).toInt()
-            val start = (center - visible / 2).coerceIn(0, total - visible)
-            val barWidth = size.width / visible
-            for (i in 0 until visible) {
-                val point = waveform.points.getOrNull(start + i) ?: continue
-                val x = i * barWidth
-                val lowH = (point.low / max.toFloat()) * size.height * 0.9f
-                val midH = (point.mid / max.toFloat()) * size.height * 0.7f
-                val highH = (point.high / max.toFloat()) * size.height * 0.5f
-                drawRect(Color(0xFF4A90D9), Offset(x, size.height - lowH), Size(barWidth * 0.9f, lowH))
-                drawRect(Color(0xFF7ED321), Offset(x, size.height - midH), Size(barWidth * 0.6f, midH))
-                drawRect(Color.White, Offset(x + barWidth * 0.25f, size.height - highH), Size(barWidth * 0.3f, highH))
+            analysis.cues.forEach { cue ->
+                val cueMs = if (rate != null) cue.sampleOffset / rate * 1000.0 else return@forEach
+                val cueX = (cueMs / safeDuration * size.width).toFloat()
+                drawLine(analysisColor(cue.color), Offset(cueX, 0f), Offset(cueX, size.height), 2f)
             }
-            drawLine(Color(0xFFFF4444), Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 2.5f)
+            drawLine(Color(0xFF00E5FF), Offset(progress * size.width, 0f), Offset(progress * size.width, size.height), 2.5f)
         }
+        Spacer(Modifier.height(6.dp))
+        Canvas(
+            Modifier.fillMaxWidth().height(142.dp)
+                .background(Color(0xFF020609), RoundedCornerShape(8.dp))
+                .pointerInput(startIndex, endIndex, safeDuration) {
+                    detectTapGestures { tap ->
+                        val index = startIndex + tap.x / size.width.toFloat() * (endIndex - startIndex)
+                        onSeek((index / total.toFloat() * safeDuration.toFloat()).toLong().coerceIn(0L, safeDuration))
+                    }
+                }
+        ) {
+            val count = (endIndex - startIndex).coerceAtLeast(1)
+            val px = size.width / count
+            for (i in startIndex until endIndex) {
+                val x = (i - startIndex + 0.5f) * px
+                drawFrequencyBar(x, size.height / 2f, size.height * 0.47f, waveform.points[i], waveform)
+            }
+            val windowStartMs = startIndex.toDouble() / total * safeDuration.toDouble()
+            val windowEndMs = endIndex.toDouble() / total * safeDuration.toDouble()
+            val grid = analysis.beatGrid
+            val bpm = grid?.let(AnalysisDecoder::estimatedBpm)
+            val anchor = grid?.let { it.adjustedMarkers.ifEmpty { it.defaultMarkers }.firstOrNull() }
+            if (rate != null && bpm != null && anchor != null) {
+                val beatMs = 60_000.0 / bpm
+                val anchorMs = anchor.sampleOffset / rate * 1000.0
+                var n = kotlin.math.floor((windowStartMs - anchorMs) / beatMs).toInt()
+                while (anchorMs + n * beatMs <= windowEndMs) {
+                    val beatTime = anchorMs + n * beatMs
+                    val x = ((beatTime - windowStartMs) / (windowEndMs - windowStartMs) * size.width).toFloat()
+                    val major = (anchor.beatNumber + n.toLong()) % 4L == 0L
+                    drawLine(if (major) Color(0xFF607D8B) else Color(0xFF263238), Offset(x, 0f), Offset(x, size.height), if (major) 1.5f else 1f)
+                    n++
+                }
+            }
+            analysis.cues.forEach { cue ->
+                val cueMs = if (rate != null) cue.sampleOffset / rate * 1000.0 else return@forEach
+                if (cueMs in windowStartMs..windowEndMs) {
+                    val x = ((cueMs - windowStartMs) / (windowEndMs - windowStartMs) * size.width).toFloat()
+                    drawLine(analysisColor(cue.color), Offset(x, 0f), Offset(x, size.height), 3f)
+                }
+            }
+            drawLine(Color.White, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), 3f)
+            drawLine(Color(0xFF00E5FF), Offset(size.width / 2f - 2f, 0f), Offset(size.width / 2f - 2f, size.height), 1f)
+        }
+        Text("Waveform antippen zum Springen", style = MaterialTheme.typography.labelSmall, color = Color(0xFF78909C), modifier = Modifier.padding(top = 4.dp))
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFrequencyBar(
+    x: Float,
+    centerY: Float,
+    maxHeight: Float,
+    point: WaveformPoint,
+    waveform: OverviewWaveform
+) {
+    val low = point.low / waveform.maxLow.coerceAtLeast(1).toFloat() * maxHeight
+    val mid = point.mid / waveform.maxMid.coerceAtLeast(1).toFloat() * maxHeight
+    val high = point.high / waveform.maxHigh.coerceAtLeast(1).toFloat() * maxHeight
+    drawLine(Color(0xFF0877C9), Offset(x, centerY - low), Offset(x, centerY + low), 2.2f)
+    drawLine(Color(0xFF22E56F), Offset(x, centerY - mid), Offset(x, centerY + mid), 1.7f)
+    drawLine(Color(0xFFE9FFFF), Offset(x, centerY - high), Offset(x, centerY + high), 1.0f)
 }
