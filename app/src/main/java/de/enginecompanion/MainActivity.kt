@@ -366,6 +366,9 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     var ready by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
+    var activeLoopNumber by remember(media.url) { mutableStateOf<Int?>(null) }
+    val sampleRate = analysis?.beatGrid?.sampleRate?.takeIf { it.isFinite() && it > 0 }
+    val activeLoop = analysis?.loops?.firstOrNull { it.number == activeLoopNumber }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(value: Boolean) { playing = value }
@@ -377,12 +380,20 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
         player.addListener(listener)
         onDispose { player.removeListener(listener); player.release() }
     }
-    LaunchedEffect(player, playing) {
+    LaunchedEffect(player, playing, activeLoopNumber, sampleRate) {
         while (true) {
             if (playing) {
                 withFrameNanos {
                     position = player.currentPosition.coerceAtLeast(0L)
                     duration = player.duration.coerceAtLeast(0L)
+                    if (activeLoop != null && sampleRate != null) {
+                        val start = sampleToMs(activeLoop.startSample, sampleRate)
+                        val end = sampleToMs(activeLoop.endSample, sampleRate)
+                        if (end > start && position >= end) {
+                            player.seekTo(start)
+                            position = start
+                        }
+                    }
                 }
             } else {
                 position = player.currentPosition.coerceAtLeast(0L)
@@ -422,7 +433,86 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
         Button(onClick = { if (player.isPlaying) player.pause() else player.play() }, enabled = ready) { Text(if (playing) "Pause" else "Play") }
         OutlinedButton(onClick = { player.seekTo((player.currentPosition + 10_000).coerceAtMost(duration)) }, enabled = ready) { Text("+10 s") }
     }
+    analysis?.let { currentAnalysis ->
+        PlayerPerformancePads(
+            analysis = currentAnalysis,
+            activeLoopNumber = activeLoopNumber,
+            enabled = ready,
+            onCue = { samples ->
+                sampleRate?.let { rate ->
+                    val target = sampleToMs(samples, rate).coerceIn(0L, duration)
+                    player.seekTo(target)
+                    position = target
+                    player.play()
+                }
+            },
+            onLoop = { loop ->
+                if (activeLoopNumber == loop.number) activeLoopNumber = null
+                else {
+                    activeLoopNumber = loop.number
+                    sampleRate?.let { rate ->
+                        val start = sampleToMs(loop.startSample, rate)
+                        val end = sampleToMs(loop.endSample, rate)
+                        if (player.currentPosition !in start until end) {
+                            player.seekTo(start)
+                            position = start
+                        }
+                        player.play()
+                    }
+                }
+            }
+        )
+    }
 }
+
+@Composable
+private fun PlayerPerformancePads(
+    analysis: TrackAnalysis,
+    activeLoopNumber: Int?,
+    enabled: Boolean,
+    onCue: (Double) -> Unit,
+    onLoop: (SavedLoop) -> Unit
+) {
+    Text("Hot Cues", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, bottom = 6.dp))
+    val cues = analysis.cues.associateBy(CuePoint::number)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        repeat(2) { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                repeat(4) { column ->
+                    val number = row * 4 + column + 1
+                    val cue = cues[number]
+                    val accent = cue?.let { analysisColor(it.color) } ?: MaterialTheme.colorScheme.surfaceVariant
+                    Button(
+                        onClick = { cue?.let { onCue(it.sampleOffset) } },
+                        enabled = enabled && cue != null,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = accent.copy(alpha = 0.78f))
+                    ) { Text(cue?.label?.takeIf(String::isNotBlank) ?: number.toString(), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+        }
+    }
+    analysis.mainCueSample?.takeIf { it >= 0 }?.let { mainCue ->
+        OutlinedButton(onClick = { onCue(mainCue) }, enabled = enabled, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Main Cue") }
+    }
+    if (analysis.loops.isNotEmpty()) {
+        Text("Gespeicherte Loops", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            analysis.loops.take(4).forEach { loop ->
+                FilterChip(
+                    selected = activeLoopNumber == loop.number,
+                    onClick = { onLoop(loop) },
+                    enabled = enabled,
+                    label = { Text(loop.label.ifBlank { "Loop ${loop.number}" }, maxLines = 1) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+private fun sampleToMs(samples: Double, sampleRate: Double): Long = (samples / sampleRate * 1000.0).toLong().coerceAtLeast(0L)
 
 private fun playerTime(milliseconds: Long): String {
     val seconds = milliseconds.coerceAtLeast(0) / 1000
