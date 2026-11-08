@@ -6,6 +6,7 @@ interface EngineAdapter {
     fun supports(schema: DbSchema): Boolean
     fun playlists(db: SQLiteDatabase): List<Playlist>
     fun members(db: SQLiteDatabase, playlist: Long): OrderedMembers
+    fun countTracks(db: SQLiteDatabase, schema: DbSchema, query: String, ids: List<Long>?): Int
     fun tracks(db: SQLiteDatabase, schema: DbSchema, query: String, sort: String, limit: Int, ids: List<Long>?): List<Track>
 }
 abstract class DirectTrackAdapter(private val versions: Set<String>) : EngineAdapter {
@@ -23,6 +24,15 @@ abstract class DirectTrackAdapter(private val versions: Set<String>) : EngineAda
             while (c.moveToNext()) add(Membership(c.getLong(0), c.getLong(1), if (c.isNull(2)) null else c.getLong(2), c.getString(3)))
         }
     })
+    override fun countTracks(db: SQLiteDatabase, schema: DbSchema, query: String, ids: List<Long>?): Int {
+        if (ids != null && ids.isEmpty()) return 0
+        val escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        val idFilter = ids?.joinToString(",", " AND id IN (", ")") ?: ""
+        return db.rawQuery(
+            "SELECT count(*) FROM Track WHERE (title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\')$idFilter",
+            arrayOf("%$escaped%", "%$escaped%", "%$escaped%")
+        ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
+    }
     override fun tracks(db: SQLiteDatabase, schema: DbSchema, query: String, sort: String, limit: Int, ids: List<Long>?): List<Track> {
         if (ids != null && ids.isEmpty()) return emptyList()
         val columns = listOf("id", "title", "artist", "album", "length", "bpm", "bpmAnalyzed", "key", "rating").filter { schema.has("Track", it) }

@@ -28,6 +28,13 @@ class DatabaseTest {
         val rows=Engine3Adapter().tracks(db,SchemaInspector.inspect(db),"%_","Titel",200,null)
         assertEquals(listOf(9L),rows.map{it.id});assertEquals(123.5,rows.single().bpm!!,0.001)
     } }
+    @Test fun countUsesSameLiteralSearchAndPlaylistFilter() { fixture().use { db ->
+        val adapter = Engine3Adapter()
+        val schema = SchemaInspector.inspect(db)
+        assertEquals(1, adapter.countTracks(db, schema, "%_", null))
+        assertEquals(1, adapter.countTracks(db, schema, "", listOf(9)))
+        assertEquals(0, adapter.countTracks(db, schema, "", emptyList()))
+    } }
     @Test fun missingOptionalColumnDoesNotCrash() { fixture().use { db ->
         val rows=Engine3Adapter().tracks(db,SchemaInspector.inspect(db),"","Titel",200,null);assertEquals(2,rows.size);assertNull(rows.first().key)
     } }

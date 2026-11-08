@@ -1,6 +1,6 @@
 # Validierung — 8. November 2026
 
-Aktueller Entwicklungsstand: `0.3.2-readonly` (Version Code 7). Die unten aufgeführten Build-Ergebnisse stammen aus der Validierung von 0.3.0; 0.3.2 wird nach dem Push durch den Android-CI-Workflow erneut geprüft.
+Aktueller Entwicklungsstand: `0.3.3-readonly` (Version Code 8). Die unten aufgeführten Build-Ergebnisse stammen aus der Validierung von 0.3.0; 0.3.3 wird nach dem Push durch den Android-CI-Workflow erneut geprüft.
 
 ```
 ./gradlew clean assembleDebug testDebugUnitTest lintDebug
@@ -30,6 +30,10 @@ Playlist-Baum: Aufklappzustand wird über Prozessneustarts gespeichert. Ordner u
 ## Änderung 0.3.2
 
 USB- und Backup-Momentaufnahmen erhalten jetzt dieselben direkten und rekursiven Playlist-Trackzahlen wie EngineX-WLAN-Momentaufnahmen. Die Zuordnung wird ausschließlich aus bestätigten `PlaylistEntity`-Einträgen mit passender Datenbank-UUID aufgebaut. Zwei zusätzliche Unit-Tests prüfen rekursive Zahlen, doppelte Einträge und defekte Elternzyklen. Dokumentation und tatsächlich verwendete Android-/Compose-Versionen wurden abgeglichen.
+
+## Änderung 0.3.3
+
+Die bestätigte Engine-Tonartskala 0–23 wird in den Trackkarten als Camelot 1A–12B dargestellt. Die Detailansicht ergänzt dazu die musikalische Tonart und behält den Rohwert für die Diagnose. Tracklisten zeigen jetzt „geladen von insgesamt“; lokale SQLite-Suchen verwenden für die Gesamtzahl dieselben Such- und Playlistfilter wie die eigentliche Abfrage.
 
 ## Änderung 0.3.0
 

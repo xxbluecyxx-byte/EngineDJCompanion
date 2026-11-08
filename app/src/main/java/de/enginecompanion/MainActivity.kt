@@ -200,11 +200,11 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             (if (state.playlist != null) listOf("Playlist", "Titel", "Interpret", "BPM") else listOf("Titel", "Interpret", "BPM")).forEach { sort -> FilterChip(selected = state.sort == sort, onClick = { vm.sort(sort) }, enabled = !state.busy, label = { Text(sort) }) }
                         }
                         if (state.querying) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text("${state.tracks.size} angezeigt · ${if (state.remoteActive) "EngineX-WLAN-Momentaufnahme" else "lokale USB-Momentaufnahme"}", style = MaterialTheme.typography.labelSmall)
+                        Text("${state.tracks.size} von ${state.totalMatches} angezeigt · ${if (state.remoteActive) "EngineX-WLAN-Momentaufnahme" else "lokale USB-Momentaufnahme"}", style = MaterialTheme.typography.labelSmall)
                         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
                             items(state.tracks, key = { it.id }) { track -> TrackCard(track, !state.busy) { vm.details(track) } }
                             if (state.tracks.isEmpty() && !state.querying) item { Text("Keine passenden Tracks. Bei Playlists ggf. externe Referenzen oder Diagnose prüfen.", Modifier.padding(16.dp)) }
-                            if (state.tracks.size >= state.limit && state.limit < 100000) item { OutlinedButton(onClick = vm::more, enabled = !state.busy) { Text("Weitere 200 laden") } }
+                            if (state.tracks.size < state.totalMatches && state.limit < 100000) item { OutlinedButton(onClick = vm::more, enabled = !state.busy) { Text("Weitere 200 laden") } }
                             if (state.limit == 100000) item { Text("Sicherheitsgrenze: 100.000 Ergebnisse. Suche eingrenzen.") }
                         }
                     }

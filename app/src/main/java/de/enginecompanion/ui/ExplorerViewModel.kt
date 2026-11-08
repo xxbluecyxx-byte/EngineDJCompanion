@@ -28,7 +28,7 @@ data class ExplorerState(
     val engineXConfigured: Boolean = false,
     val remoteLibrary: EngineXSnapshot? = null, val remoteActive: Boolean = false,
     val query: String = "", val sort: String = "Titel", val playlist: Long? = null,
-    val limit: Int = 200, val details: String? = null, val detailTitle: String = "", val querying: Boolean = false
+    val limit: Int = 200, val totalMatches: Int = 0, val details: String? = null, val detailTitle: String = "", val querying: Boolean = false
 )
 class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = LibraryRepository(app)
@@ -191,7 +191,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
                 val remote = state.value.remoteLibrary ?: return@launch
                 val playlistNames = remote.playlistTracks.filterValues { track.id in it }.keys.mapNotNull { id -> remote.playlists.find { it.id == id }?.title }
                 val seconds = track.seconds?.toLong()?.takeIf { it >= 0 }?.let { "%d:%02d".format(it / 60, it % 60) } ?: "—"
-                mutable.update { it.copy(details = "EngineX WLAN · offline verfügbar\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: $seconds\nBPM: ${track.bpm ?: "—"}\nTonart: ${MetadataDisplay.key(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}", detailTitle = track.title) }
+                mutable.update { it.copy(details = "EngineX WLAN · offline verfügbar\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: $seconds\nBPM: ${track.bpm ?: "—"}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}", detailTitle = track.title) }
                 return@launch
             }
             val library = state.value.library ?: return@launch
@@ -221,14 +221,14 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
                     "BPM" -> rows.sortedBy { it.bpm ?: Double.MAX_VALUE }
                     else -> rows.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
                 }
-                mutable.update { it.copy(tracks = rows.take(snapshot.limit), querying = false) }
+                mutable.update { it.copy(tracks = rows.take(snapshot.limit), totalMatches = rows.size, querying = false) }
                 return@launch
             }
             val library = snapshot.library ?: return@launch
             mutable.update { it.copy(querying = true) }
             try {
                 val page = withContext(Dispatchers.IO) { mutex.withLock { repository.tracks(library, snapshot.playlist, snapshot.query, snapshot.sort, snapshot.limit) } }
-                ensureActive(); mutable.update { it.copy(tracks = page.tracks, warning = page.warning) }
+                ensureActive(); mutable.update { it.copy(tracks = page.tracks, totalMatches = page.total, warning = page.warning) }
             } catch (e: Exception) { fail(e) }
             finally { mutable.update { it.copy(querying = false) } }
         }

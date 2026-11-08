@@ -44,6 +44,8 @@ Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dat
 - sqlite_master-, Spalten-, PK-, FK- und Versionsanalyse aller importierten DB-Dateien. Diagnosedateiexport.
 - Getrennte Schema-2-/Schema-3-Adapter, Trackliste, Suche, Sortierung, Playlist-Zuordnung und verkettete Reihenfolge.
 - Titel, Interpret, Album, Dauer, BPM, Tonart, Sterne bei dokumentierten Werten; unbekannte Werte bleiben als Rohwert sichtbar.
+- Tonarten erscheinen in der Trackliste als Camelot-Code; Details zeigen zusätzlich die musikalische Schreibweise und den unveränderten Rohwert.
+- Tracklisten zeigen geladene und vollständige Trefferzahl getrennt; weitere Ergebnisse werden in 200er-Schritten geladen.
 - Trackdetails einschließlich tatsächlicher Rohmetadaten und PerformanceData-BLOB-Längen.
 - Authentifizierte EngineX-LAN-Erkennung, verschlüsselte Zugangsdaten und private Offline-Momentaufnahme.
 - Wechsel zwischen lokaler USB-Momentaufnahme und EngineX-WLAN-Momentaufnahme.

@@ -14,7 +14,7 @@ class LibraryRepository(private val context: Context) {
         val playlistTracks: Map<Long, List<Long>>,
         val diagnostics: String
     )
-    data class Page(val tracks: List<Track>, val warning: String? = null)
+    data class Page(val tracks: List<Track>, val total: Int, val warning: String? = null)
     private val preferences = context.getSharedPreferences("library", Context.MODE_PRIVATE)
     private fun open(file: File) = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS).apply { execSQL("PRAGMA query_only=ON") }
     fun loadSaved(): Library? = preferences.getString("snapshot", null)?.let { File(context.filesDir, "snapshots/$it") }?.takeIf { it.isDirectory }?.let { inspect(it) }
@@ -57,7 +57,7 @@ class LibraryRepository(private val context: Context) {
         return Library(directory, schema, adapter, playlists, playlistTracks, report.toString())
     }
     fun tracks(library: Library, playlist: Long?, query: String, sort: String, limit: Int): Page {
-        val adapter = library.adapter ?: return Page(emptyList())
+        val adapter = library.adapter ?: return Page(emptyList(), 0)
         return open(File(library.directory, "working/m.db")).use { db ->
             val membership = playlist?.let { adapter.members(db, it) }
             val local = membership?.members?.let { MembershipResolver.local(it, library.schema.uuid) }
@@ -66,11 +66,13 @@ class LibraryRepository(private val context: Context) {
             val foundIds = ids?.chunked(500)?.sumOf { chunk -> db.rawQuery("SELECT count(*) FROM Track WHERE id IN (${chunk.joinToString()})", null).use { c -> c.moveToFirst(); c.getInt(0) } }
             val missing = if (ids == null) 0 else ids.size - (foundIds ?: 0)
             val tracks = adapter.tracks(db, library.schema, query, sort, if (sort == "Playlist") 100000 else limit, ids)
-            Page(tracks.take(limit), listOfNotNull(membership?.warning, if (missing > 0) "$missing Playlist-Track-IDs fehlen in Track." else null, if (excluded > 0) "$excluded Einträge haben fremde oder nicht auflösbare Datenbank-UUIDs." else null).joinToString("\n").ifEmpty { null })
+            val total = adapter.countTracks(db, library.schema, query, ids)
+            Page(tracks.take(limit), total, listOfNotNull(membership?.warning, if (missing > 0) "$missing Playlist-Track-IDs fehlen in Track." else null, if (excluded > 0) "$excluded Einträge haben fremde oder nicht auflösbare Datenbank-UUIDs." else null).joinToString("\n").ifEmpty { null })
         }
     }
     fun details(library: Library, track: Track): String = buildString {
         appendLine("Track-ID: ${track.id}")
+        appendLine("Tonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})")
         open(File(library.directory, "working/m.db")).use { db ->
             val fields = library.schema.tables["Track"].orEmpty().filterNot { it.type.contains("BLOB", true) }.map { it.name }
             db.rawQuery("SELECT ${fields.joinToString { quote(it) }} FROM Track WHERE id=?", arrayOf(track.id.toString())).use { c -> if (c.moveToFirst()) fields.forEach { appendLine("$it: ${c.text(it) ?: "—"}") } }
