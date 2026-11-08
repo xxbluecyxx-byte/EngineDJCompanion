@@ -22,6 +22,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
+	agentVersion  = 2
 )
 
 type drive struct {
@@ -31,7 +32,7 @@ type drive struct {
 
 var allowedDrives = map[string]drive{
 	"Engine": {
-		root: "/media/Engine",
+		root: "/media/Engine/Engine Library",
 		db:   "/media/Engine/Engine Library/Database2/m.db",
 	},
 }
@@ -96,7 +97,7 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": 1, "readOnly": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": true})
 }
 
 func (s *server) track(w http.ResponseWriter, r *http.Request) {
