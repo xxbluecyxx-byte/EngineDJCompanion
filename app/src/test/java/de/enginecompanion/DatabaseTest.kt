@@ -13,11 +13,11 @@ class DatabaseTest {
     private fun fixture() = SQLiteDatabase.create(null).apply {
         execSQL("CREATE TABLE Information(uuid TEXT,schemaVersionMajor INTEGER,schemaVersionMinor INTEGER,schemaVersionPatch INTEGER)")
         execSQL("INSERT INTO Information VALUES('local',3,0,0)")
-        execSQL("CREATE TABLE Track(id INTEGER PRIMARY KEY,title TEXT,artist TEXT,album TEXT,length INTEGER,bpmAnalyzed REAL,rating INTEGER)")
+        execSQL("CREATE TABLE Track(id INTEGER PRIMARY KEY,title TEXT,artist TEXT,album TEXT,length INTEGER,bpmAnalyzed REAL,rating INTEGER,originDatabaseUuid TEXT,originTrackId INTEGER)")
         execSQL("CREATE TABLE Playlist(id INTEGER PRIMARY KEY,title TEXT,parentListId INTEGER,nextListId INTEGER)")
         execSQL("CREATE TABLE PlaylistEntity(id INTEGER PRIMARY KEY,listId INTEGER,trackId INTEGER,databaseUuid TEXT,nextEntityId INTEGER,FOREIGN KEY(listId) REFERENCES Playlist(id))")
-        execSQL("INSERT INTO Track VALUES(9,'100%_mix','Artist','Album',120,123.5,80)")
-        execSQL("INSERT INTO Track VALUES(4,'100XXmix','Other','Album',60,99,0)")
+        execSQL("INSERT INTO Track VALUES(9,'100%_mix','Artist','Album',120,123.5,80,'local',9)")
+        execSQL("INSERT INTO Track VALUES(4,'100XXmix','Other','Album',60,99,0,'local',4)")
         execSQL("INSERT INTO Playlist VALUES(1,'Test',0,0)")
         execSQL("INSERT INTO PlaylistEntity VALUES(1,1,9,'local',0)")
     }

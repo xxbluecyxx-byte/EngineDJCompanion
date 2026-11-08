@@ -11,7 +11,7 @@ interface EngineAdapter {
 }
 abstract class DirectTrackAdapter(private val versions: Set<String>) : EngineAdapter {
     override fun supports(schema: DbSchema) = schema.version in versions &&
-        schema.has("Track", "id", "title", "artist", "album", "length") &&
+        schema.has("Track", "id", "title", "artist", "album", "length", "originDatabaseUuid", "originTrackId") &&
         schema.has("Playlist", "id", "title", "parentListId", "nextListId") &&
         schema.has("PlaylistEntity", "id", "listId", "trackId", "databaseUuid", "nextEntityId")
     override fun playlists(db: SQLiteDatabase): List<Playlist> = buildList {

@@ -96,6 +96,8 @@ object PlaylistCounts {
     }
 }
 data class Membership(val id: Long, val trackId: Long, val next: Long?, val databaseUuid: String?)
+data class TrackIdentity(val localId: Long, val originDatabaseUuid: String?, val originTrackId: Long?)
+data class ResolvedMemberships(val localTrackIds: List<Long>, val unresolved: Int)
 data class OrderedMembers(val members: List<Membership>, val warning: String?)
 object PlaylistOrder {
     fun order(rows: List<Membership>): OrderedMembers {
@@ -114,5 +116,19 @@ object PlaylistOrder {
     }
 }
 object MembershipResolver {
-    fun local(rows: List<Membership>, uuid: String?): List<Membership> = if (uuid.isNullOrEmpty()) emptyList() else rows.filter { it.databaseUuid == uuid }
+    fun resolve(rows: List<Membership>, libraryUuid: String?, tracks: List<TrackIdentity>): ResolvedMemberships {
+        val localIds = tracks.map(TrackIdentity::localId).toHashSet()
+        val byOrigin = tracks.mapNotNull { track ->
+            val uuid = track.originDatabaseUuid?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val id = track.originTrackId ?: return@mapNotNull null
+            (uuid to id) to track.localId
+        }.toMap()
+        var unresolved = 0
+        val ids = rows.mapNotNull { member ->
+            val origin = member.databaseUuid?.let { uuid -> byOrigin[uuid to member.trackId] }
+            val local = member.trackId.takeIf { member.databaseUuid == libraryUuid && it in localIds }
+            (origin ?: local).also { if (it == null) unresolved++ }
+        }
+        return ResolvedMemberships(ids, unresolved)
+    }
 }

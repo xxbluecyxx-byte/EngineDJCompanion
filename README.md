@@ -43,6 +43,7 @@ Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dat
 - Vorheriger erfolgreicher Import bleibt bei Fehlern erhalten. Erfolgreiche Momentaufnahme offline nach App-Neustart verfügbar.
 - sqlite_master-, Spalten-, PK-, FK- und Versionsanalyse aller importierten DB-Dateien. Diagnosedateiexport.
 - Getrennte Schema-2-/Schema-3-Adapter, Trackliste, Suche, Sortierung, Playlist-Zuordnung und verkettete Reihenfolge.
+- Lokale Playlist-Einträge werden wie beim EngineX-Endpunkt über `databaseUuid + trackId` gegen `originDatabaseUuid + originTrackId` auf die tatsächliche lokale Track-ID abgebildet.
 - Titel, Interpret, Album, Dauer, BPM, Tonart, Sterne bei dokumentierten Werten; unbekannte Werte bleiben als Rohwert sichtbar.
 - Tonarten erscheinen in der Trackliste als Camelot-Code; Details zeigen zusätzlich die musikalische Schreibweise und den unveränderten Rohwert.
 - Tracklisten zeigen geladene und vollständige Trefferzahl getrennt; weitere Ergebnisse werden in 200er-Schritten geladen.

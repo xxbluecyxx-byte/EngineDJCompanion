@@ -2,7 +2,7 @@
 
 Keine Gerätekompatibilität behauptet. Unterstützte Referenzprofile: 2.18.0, 2.20.1–2.20.3, 2.21.0–2.21.2 sowie 3.0.0–3.0.2, jeweils mit zusätzlicher Prüfung aller benötigten Spalten. Andere Versionen und fehlende Pflichtspalten führen ausschließlich zur Diagnose. Schema-Version und Engine-OS-Version sind verschieden.
 
-Die Adapter lesen vorhandene Track-Spalten. PlaylistEntity.listId/trackId verknüpfen Listen und Tracks; nextEntityId gibt die Reihenfolge vor. Fremde/fehlende Datenbank-UUIDs werden nicht lokal zugeordnet. Ungültige Verkettungen und fehlende Track-IDs erzeugen Warnungen.
+Die Adapter lesen vorhandene Track-Spalten. `PlaylistEntity.listId` ordnet Einträge einer Liste zu und `nextEntityId` gibt die Reihenfolge vor. Die Track-Referenz besteht aus `databaseUuid + trackId` und wird gegen `Track.originDatabaseUuid + Track.originTrackId` auf die lokale `Track.id` abgebildet. Ein direkter ID-Fallback ist ausschließlich bei Übereinstimmung mit der aktuellen Library-UUID erlaubt. Ungültige Verkettungen und nicht auflösbare Herkunftsschlüssel erzeugen Warnungen.
 
 Referenz: libdjinterop, Commit 597be49121abf175f5347662e425ae28a463d922. Eigene Kotlin-Implementierung; keine C++-Bibliothek eingebunden und kein fremder Implementierungscode übernommen.
 

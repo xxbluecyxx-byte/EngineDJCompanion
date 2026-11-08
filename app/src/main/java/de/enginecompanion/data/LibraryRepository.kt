@@ -12,6 +12,7 @@ class LibraryRepository(private val context: Context) {
         val adapter: EngineAdapter?,
         val playlists: List<Playlist>,
         val playlistTracks: Map<Long, List<Long>>,
+        val playlistWarnings: Map<Long, String>,
         val diagnostics: String
     )
     data class Page(val tracks: List<Track>, val total: Int, val warning: String? = null)
@@ -45,29 +46,37 @@ class LibraryRepository(private val context: Context) {
         val schema = checkNotNull(main) { "m.db fehlt in der Momentaufnahme." }
         val adapter = AdapterRegistry.resolve(schema)
         report.appendLine("Adapter: ${adapter?.label ?: "UNBEKANNT – kein semantischer Import"}")
-        report.appendLine("Gerätevalidierung: ausstehend. Smartlists nicht ausgewertet. Cues/Loops/Beatgrid: Binärdaten nicht dekodiert.")
-        val (playlists, playlistTracks) = if (adapter == null) emptyList<Playlist>() to emptyMap() else open(File(directory, "working/m.db")).use { db ->
+        report.appendLine("Smartlists nicht ausgewertet. Cues/Loops/Beatgrid werden bei vorhandenen bestätigten PerformanceData-Spalten strikt lesend dekodiert.")
+        val playlistData = if (adapter == null) {
+            Triple(emptyList<Playlist>(), emptyMap<Long, List<Long>>(), emptyMap<Long, String>())
+        } else open(File(directory, "working/m.db")).use { db ->
             val lists = adapter.playlists(db)
-            val members = lists.associate { playlist ->
-                val local = MembershipResolver.local(adapter.members(db, playlist.id).members, schema.uuid)
-                playlist.id to local.map(Membership::trackId).distinct()
+            val identities = buildList {
+                db.rawQuery("SELECT id,originDatabaseUuid,originTrackId FROM Track", null).use { c ->
+                    while (c.moveToNext()) add(TrackIdentity(c.getLong(0), c.text("originDatabaseUuid"), c.text("originTrackId")?.toLongOrNull()))
+                }
             }
-            lists to members
+            val warnings = mutableMapOf<Long, String>()
+            val members = lists.associate { playlist ->
+                val ordered = adapter.members(db, playlist.id)
+                val resolved = MembershipResolver.resolve(ordered.members, schema.uuid, identities)
+                listOfNotNull(ordered.warning, resolved.unresolved.takeIf { it > 0 }?.let { "$it Playlist-Einträge konnten keiner lokalen Track-Herkunft zugeordnet werden." })
+                    .joinToString("\n").takeIf(String::isNotEmpty)?.let { warnings[playlist.id] = it }
+                playlist.id to resolved.localTrackIds
+            }
+            Triple(lists, members, warnings.toMap())
         }
-        return Library(directory, schema, adapter, playlists, playlistTracks, report.toString())
+        return Library(directory, schema, adapter, playlistData.first, playlistData.second, playlistData.third, report.toString())
     }
     fun tracks(library: Library, playlist: Long?, query: String, sort: String, limit: Int): Page {
         val adapter = library.adapter ?: return Page(emptyList(), 0)
         return open(File(library.directory, "working/m.db")).use { db ->
-            val membership = playlist?.let { adapter.members(db, it) }
-            val local = membership?.members?.let { MembershipResolver.local(it, library.schema.uuid) }
-            val excluded = (membership?.members?.size ?: 0) - (local?.size ?: 0)
-            val ids = local?.map { it.trackId }?.distinct()
+            val ids = playlist?.let { library.playlistTracks[it].orEmpty() }
             val foundIds = ids?.chunked(500)?.sumOf { chunk -> db.rawQuery("SELECT count(*) FROM Track WHERE id IN (${chunk.joinToString()})", null).use { c -> c.moveToFirst(); c.getInt(0) } }
             val missing = if (ids == null) 0 else ids.size - (foundIds ?: 0)
             val tracks = adapter.tracks(db, library.schema, query, sort, if (sort == "Playlist") 100000 else limit, ids)
             val total = adapter.countTracks(db, library.schema, query, ids)
-            Page(tracks.take(limit), total, listOfNotNull(membership?.warning, if (missing > 0) "$missing Playlist-Track-IDs fehlen in Track." else null, if (excluded > 0) "$excluded Einträge haben fremde oder nicht auflösbare Datenbank-UUIDs." else null).joinToString("\n").ifEmpty { null })
+            Page(tracks.take(limit), total, listOfNotNull(playlist?.let(library.playlistWarnings::get), if (missing > 0) "$missing Playlist-Track-IDs fehlen in Track." else null).joinToString("\n").ifEmpty { null })
         }
     }
     fun details(library: Library, track: Track): String = buildString {

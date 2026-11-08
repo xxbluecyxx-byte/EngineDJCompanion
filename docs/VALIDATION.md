@@ -1,6 +1,6 @@
 # Validierung — 8. November 2026
 
-Aktueller Entwicklungsstand: `0.4.0-readonly` (Version Code 10). Der GitHub-CI-Lauf für 0.3.3 war vollständig erfolgreich; 0.4.0 wird nach dem Push erneut geprüft.
+Aktueller Entwicklungsstand: `0.4.1-readonly` (Version Code 11). Der GitHub-CI-Lauf für 0.3.3 war vollständig erfolgreich; 0.4.1 wird nach dem Push erneut geprüft.
 
 ```
 ./gradlew clean assembleDebug testDebugUnitTest lintDebug
@@ -42,6 +42,10 @@ Trackdetails öffnen als eigene vollflächige Ansicht und formatieren Dauer und 
 ## Änderung 0.4.0
 
 Ein eigenständiger, strikt lesender Decoder verarbeitet die von `libdjinterop` dokumentierten Engine-3.x-Strukturen für Hot Cues, gespeicherte Loops und Beatgrids. Komprimierte Daten erhalten ein festes 64-MiB-Limit; Eintragszahlen, Feldgrenzen und unkomprimierte Länge werden geprüft. Sample-Positionen erscheinen anhand der im Beatgrid gespeicherten Sample-Rate in Sekunden. Synthetische Binärfixtures prüfen Big-/Little-Endian-Felder, Qt-/zlib-Dekompression, Cue-/Loop-Zeitumrechnung und die Ablehnung unplausibler Eintragszahlen. Die praktische Übereinstimmung mit bekannten Markern auf dem Prime steht noch aus.
+
+## Änderung 0.4.1
+
+Die lokale USB-Zuordnung verwendet nun denselben bestätigten Herkunftsschlüssel wie der korrigierte EngineX-Endpunkt. `PlaylistEntity.databaseUuid + trackId` wird in nativer Playlist-Reihenfolge gegen `Track.originDatabaseUuid + originTrackId` aufgelöst. Der vorherige Filter auf ausschließlich die aktuelle Library-UUID ließ reale, aus anderen Engine-Libraries stammende Einträge leer erscheinen. Unit-Tests prüfen Herkunftsauflösung, Reihenfolge, lokalen Fallback und nicht auflösbare Fremdschlüssel.
 
 ## Änderung 0.3.0
 
