@@ -370,8 +370,22 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     val sampleRate = analysis?.beatGrid?.sampleRate?.takeIf { it.isFinite() && it > 0 }
     val activeLoop = analysis?.loops?.firstOrNull { it.number == activeLoopNumber }
     val primeGridBpm = analysis?.beatGrid?.let(AnalysisDecoder::estimatedBpm)
-    var gridBpm by remember(media.url, primeGridBpm) { mutableStateOf(primeGridBpm) }
-    var gridOffsetMs by remember(media.url, primeGridBpm) { mutableLongStateOf(0L) }
+    val gridPreferences = remember(context) { context.getSharedPreferences("beatgrid-drafts", 0) }
+    val gridDraftKey = remember(media.url) { (media.url.hashCode().toLong() and 0xffffffffL).toString(16) }
+    var gridBpm by remember(media.url, primeGridBpm) { mutableStateOf(gridPreferences.getString("$gridDraftKey.bpm", null)?.toDoubleOrNull() ?: primeGridBpm) }
+    var gridOffsetMs by remember(media.url, primeGridBpm) { mutableLongStateOf(gridPreferences.getLong("$gridDraftKey.offset", 0L)) }
+    LaunchedEffect(gridBpm, gridOffsetMs, primeGridBpm, gridDraftKey) {
+        val changed = gridOffsetMs != 0L || (gridBpm != null && primeGridBpm != null && kotlin.math.abs(gridBpm!! - primeGridBpm) > 0.0005)
+        gridPreferences.edit().apply {
+            if (changed) {
+                gridBpm?.let { putString("$gridDraftKey.bpm", it.toString()) }
+                putLong("$gridDraftKey.offset", gridOffsetMs)
+            } else {
+                remove("$gridDraftKey.bpm")
+                remove("$gridDraftKey.offset")
+            }
+        }.apply()
+    }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(value: Boolean) { playing = value }
@@ -445,6 +459,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             gridBpm = gridBpm,
             primeGridBpm = primeGridBpm,
             gridOffsetMs = gridOffsetMs,
+            playheadMs = position,
             enabled = ready,
             onCue = { samples ->
                 sampleRate?.let { rate ->
@@ -484,6 +499,7 @@ private fun PlayerPerformancePads(
     gridBpm: Double?,
     primeGridBpm: Double?,
     gridOffsetMs: Long,
+    playheadMs: Long,
     enabled: Boolean,
     onCue: (Double) -> Unit,
     onLoop: (SavedLoop) -> Unit,
@@ -502,6 +518,7 @@ private fun PlayerPerformancePads(
             bpm = gridBpm,
             primeBpm = primeGridBpm,
             offsetMs = gridOffsetMs,
+            playheadMs = playheadMs,
             onBpm = onGridBpm,
             onOffset = onGridOffset,
             onReset = onGridReset
@@ -552,6 +569,7 @@ private fun BeatgridControls(
     bpm: Double?,
     primeBpm: Double?,
     offsetMs: Long,
+    playheadMs: Long,
     onBpm: (Double) -> Unit,
     onOffset: (Long) -> Unit,
     onReset: () -> Unit
@@ -565,7 +583,7 @@ private fun BeatgridControls(
                 Text("Quelle: Prime · beatData", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                 Text("${markers.size} Marker · ${bpm?.let { String.format(Locale.ROOT, "%.3f BPM", it) } ?: "BPM unbekannt"}", fontWeight = FontWeight.Bold)
                 if (offsetMs != 0L || (bpm != null && primeBpm != null && kotlin.math.abs(bpm - primeBpm) > 0.0005)) {
-                    Text("Lokaler Entwurf · Offset ${if (offsetMs >= 0) "+" else ""}$offsetMs ms", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
+                    Text("Lokal gespeichert · Offset ${if (offsetMs >= 0) "+" else ""}$offsetMs ms", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
                 } else Text("Unverändert vom Prime", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -596,6 +614,20 @@ private fun BeatgridControls(
             }, modifier = Modifier.weight(1f)) { Text("TAP BPM") }
             OutlinedButton(onClick = { taps = emptyList(); onReset() }, modifier = Modifier.weight(1f)) { Text("Prime-Werte") }
         }
+        val firstMarker = markers.firstOrNull()
+        val rate = grid?.sampleRate?.takeIf { it.isFinite() && it > 0 }
+        Button(
+            onClick = {
+                if (firstMarker != null && rate != null && bpm != null) {
+                    val anchorMs = firstMarker.sampleOffset / rate * 1000.0 + offsetMs
+                    val beatMs = 60_000.0 / bpm
+                    val nearestBeat = anchorMs + kotlin.math.round((playheadMs - anchorMs) / beatMs) * beatMs
+                    onOffset(offsetMs + (playheadMs - nearestBeat).toLong())
+                }
+            },
+            enabled = firstMarker != null && rate != null && bpm != null,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Beat auf Playhead setzen · ${playerTime(playheadMs)}") }
         markers.take(4).forEachIndexed { index, marker ->
             Text("Marker ${index + 1}: ${analysisPosition(marker.sampleOffset, grid?.sampleRate)} · Beat ${marker.beatNumber}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
