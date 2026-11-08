@@ -80,3 +80,4 @@ Maximal 4 GiB Import, mindestens doppelte DB-Größe plus Arbeitsraum intern nö
 
 Siehe docs/COMPATIBILITY.md und docs/VALIDATION.md.
 Der weitere Weg vom Explorer zum WLAN-Player und sicheren Editor steht in `docs/ROADMAP.md`.
+Der separate, nur lesende ARMv7-Dienst für gezielte Analyse- und Audioabrufe liegt unter `prime-agent/` und wird als eigenes GitHub-Actions-Artefakt gebaut.

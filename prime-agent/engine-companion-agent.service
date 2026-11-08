@@ -1,0 +1,13 @@
+[Unit]
+Description=Engine Companion read-only track service
+After=enginex-stream-sync.service
+
+[Service]
+Type=simple
+ExecStart=/data/sc5000-custom/bundle/bin/engine-companion-agent
+Restart=on-failure
+RestartSec=5
+Nice=19
+
+[Install]
+WantedBy=multi-user.target
