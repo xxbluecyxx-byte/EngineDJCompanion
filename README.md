@@ -50,6 +50,7 @@ Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dat
 - Trackdetails einschließlich tatsächlicher Rohmetadaten und PerformanceData-BLOB-Längen.
 - Vollflächige Trackdetails mit exportierbarem, trackbezogenem Analysebericht; BLOBs werden nur mit Länge und maximal 64 Byte Hex-Präfix erfasst.
 - Strikt lesender Decoder für die bestätigten Engine-3.x-Strukturen `quickCues`, `loops` und `beatData`; Sample-Positionen werden mit der gespeicherten Sample-Rate als Sekunden dargestellt.
+- Smartphone-optimierte Performance-Ansicht mit echten Cue-/Loop-Farben, Main Cue, Zeitpositionen und aus den äußeren Beatgrid-Markern berechnetem Kontroll-BPM.
 - Authentifizierte EngineX-LAN-Erkennung, verschlüsselte Zugangsdaten und private Offline-Momentaufnahme.
 - Wechsel zwischen lokaler USB-Momentaufnahme und EngineX-WLAN-Momentaufnahme.
 - Aufklappbarer Playlist-Baum mit gespeichertem Zustand, visueller Ordner-/Playlist-Unterscheidung, Playlist-Suche und rekursiven Trackzahlen für EngineX- und USB-Momentaufnahmen.

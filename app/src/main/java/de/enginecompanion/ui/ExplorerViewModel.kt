@@ -28,7 +28,8 @@ data class ExplorerState(
     val engineXConfigured: Boolean = false,
     val remoteLibrary: EngineXSnapshot? = null, val remoteActive: Boolean = false,
     val query: String = "", val sort: String = "Titel", val playlist: Long? = null,
-    val limit: Int = 200, val totalMatches: Int = 0, val details: String? = null, val detailTitle: String = "", val querying: Boolean = false
+    val limit: Int = 200, val totalMatches: Int = 0, val details: String? = null, val detailAnalysis: TrackAnalysis? = null,
+    val detailTitle: String = "", val querying: Boolean = false
 )
 class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = LibraryRepository(app)
@@ -184,18 +185,18 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     fun sort(value: String) { mutable.update { it.copy(sort = value, limit = 200) }; refresh() }
     fun playlist(id: Long?) { mutable.update { it.copy(playlist = id, sort = if (id == null) "Titel" else "Playlist", limit = 200) }; refresh() }
     fun more() { mutable.update { it.copy(limit = (it.limit + 200).coerceAtMost(100000)) }; refresh() }
-    fun closeDetails() { mutable.update { it.copy(details = null) } }
+    fun closeDetails() { mutable.update { it.copy(details = null, detailAnalysis = null) } }
     fun details(track: Track) { viewModelScope.launch {
         try {
             if (state.value.remoteActive) {
                 val remote = state.value.remoteLibrary ?: return@launch
                 val playlistNames = remote.playlistTracks.filterValues { track.id in it }.keys.mapNotNull { id -> remote.playlists.find { it.id == id }?.title }
-                mutable.update { it.copy(details = "EngineX WLAN · offline verfügbar\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: ${MetadataDisplay.duration(track.seconds)}\n${MetadataDisplay.bpm(track.bpm)}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}\n\nFür Cue-/Loop-/Beatgrid-Rohdaten zur USB-Momentaufnahme wechseln und den Track dort öffnen.", detailTitle = track.title) }
+                mutable.update { it.copy(details = "EngineX WLAN · offline verfügbar\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: ${MetadataDisplay.duration(track.seconds)}\n${MetadataDisplay.bpm(track.bpm)}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}\n\nFür Cue-/Loop-/Beatgrid-Rohdaten zur USB-Momentaufnahme wechseln und den Track dort öffnen.", detailAnalysis = null, detailTitle = track.title) }
                 return@launch
             }
             val library = state.value.library ?: return@launch
             val result = withContext(Dispatchers.IO) { mutex.withLock { if (state.value.library != library) null else repository.details(library, track) } }
-            if (result != null && state.value.library == library) mutable.update { it.copy(details = result, detailTitle = track.title) }
+            if (result != null && state.value.library == library) mutable.update { it.copy(details = result.text, detailAnalysis = result.analysis, detailTitle = track.title) }
         } catch (e: Exception) { fail(e) }
     } }
     private fun refresh(debounce: Boolean = false) {

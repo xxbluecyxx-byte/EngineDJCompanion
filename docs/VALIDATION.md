@@ -1,6 +1,6 @@
 # Validierung — 8. November 2026
 
-Aktueller Entwicklungsstand: `0.4.1-readonly` (Version Code 11). Der GitHub-CI-Lauf für 0.3.3 war vollständig erfolgreich; 0.4.1 wird nach dem Push erneut geprüft.
+Aktueller Entwicklungsstand: `0.5.0-readonly` (Version Code 12). Hot-Cue-, Loop- und Beatgrid-Positionen aus 0.4.0 wurden auf dem Prime 4+ praktisch bestätigt; 0.5.0 wird nach dem Push durch GitHub CI geprüft.
 
 ```
 ./gradlew clean assembleDebug testDebugUnitTest lintDebug
@@ -46,6 +46,10 @@ Ein eigenständiger, strikt lesender Decoder verarbeitet die von `libdjinterop` 
 ## Änderung 0.4.1
 
 Die lokale USB-Zuordnung verwendet nun denselben bestätigten Herkunftsschlüssel wie der korrigierte EngineX-Endpunkt. `PlaylistEntity.databaseUuid + trackId` wird in nativer Playlist-Reihenfolge gegen `Track.originDatabaseUuid + originTrackId` aufgelöst. Der vorherige Filter auf ausschließlich die aktuelle Library-UUID ließ reale, aus anderen Engine-Libraries stammende Einträge leer erscheinen. Unit-Tests prüfen Herkunftsauflösung, Reihenfolge, lokalen Fallback und nicht auflösbare Fremdschlüssel.
+
+## Änderung 0.5.0
+
+Die praktisch bestätigten Analysewerte erscheinen als eigene Performance-Sektion: farbige Hot-Cue- und Loop-Karten, Main Cue, Sekundenpositionen und Beatgrid-Marker. Ein Kontroll-BPM wird unabhängig aus Sample-Rate sowie erstem und letztem Marker berechnet. Beim validierten Track ergaben 569 Beats über 241,362 Sekunden 141,448 BPM und bestätigten damit den gespeicherten Analysewert. Der vollständige technische Bericht bleibt darunter sichtbar und exportierbar.
 
 ## Änderung 0.3.0
 

@@ -303,14 +303,82 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                         }) { Text("Export") } }
                     )
                 }) { detailPadding ->
-                    SelectionContainer(Modifier.fillMaxSize().padding(detailPadding).verticalScroll(rememberScrollState()).padding(18.dp)) {
-                        Text(details, style = MaterialTheme.typography.bodyMedium)
+                    Column(Modifier.fillMaxSize().padding(detailPadding).verticalScroll(rememberScrollState()).padding(18.dp)) {
+                        state.detailAnalysis?.let { analysis ->
+                            AnalysisOverview(analysis)
+                            HorizontalDivider(Modifier.padding(vertical = 20.dp))
+                            Text("Technischer Bericht", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        SelectionContainer { Text(details, style = MaterialTheme.typography.bodyMedium) }
                     }
                 }
             }
         }
     }
 }
+@Composable
+private fun AnalysisOverview(analysis: TrackAnalysis) {
+    val rate = analysis.beatGrid?.sampleRate?.takeIf { it.isFinite() && it > 0 }
+    Text("Performance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Text(rate?.let { String.format(Locale.ROOT, "%.0f Hz", it) } ?: "Sample-Rate unbekannt", color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+    Text("Hot Cues", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, bottom = 6.dp))
+    if (analysis.cues.isEmpty()) Text("Keine Hot Cues gespeichert.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    analysis.cues.forEach { cue ->
+        val accent = analysisColor(cue.color)
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = accent.copy(alpha = 0.18f),
+            border = BorderStroke(1.dp, accent.copy(alpha = 0.8f))
+        ) {
+            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${cue.number}  ${cue.label.ifBlank { "Cue ${cue.number}" }}", fontWeight = FontWeight.SemiBold)
+                Text(analysisPosition(cue.sampleOffset, rate), color = accent, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+    analysis.mainCueSample?.takeIf { it >= 0 }?.let {
+        Text("Main Cue  ·  ${analysisPosition(it, rate)}", modifier = Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.secondary)
+    }
+
+    Text("Gespeicherte Loops", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, bottom = 6.dp))
+    if (analysis.loops.isEmpty()) Text("Keine gespeicherten Loops.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    analysis.loops.forEach { loop ->
+        val accent = analysisColor(loop.color)
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = accent.copy(alpha = 0.18f),
+            border = BorderStroke(1.dp, accent.copy(alpha = 0.8f))
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("${loop.number}  ${loop.label.ifBlank { "Loop ${loop.number}" }}", fontWeight = FontWeight.SemiBold)
+                Text("${analysisPosition(loop.startSample, rate)}  →  ${analysisPosition(loop.endSample, rate)}", color = accent, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
+    analysis.beatGrid?.let { grid ->
+        val markers = grid.adjustedMarkers.ifEmpty { grid.defaultMarkers }
+        val inferredBpm = AnalysisDecoder.estimatedBpm(grid)
+        Text("Beatgrid", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, bottom = 6.dp))
+        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("${if (grid.isSet) "Gesetzt" else "Nicht gesetzt"} · ${markers.size} Marker${inferredBpm?.let { " · ${String.format(Locale.ROOT, "%.3f BPM", it)}" } ?: ""}")
+                markers.take(8).forEachIndexed { index, marker ->
+                    Text("${index + 1}. ${analysisPosition(marker.sampleOffset, rate)} · Beat ${marker.beatNumber} · ${marker.beats} Beats", style = MaterialTheme.typography.bodySmall)
+                }
+                if (markers.size > 8) Text("… ${markers.size - 8} weitere Marker", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+private fun analysisColor(value: String): Color = runCatching { Color(android.graphics.Color.parseColor(value)) }.getOrDefault(Color(0xFF6BE2CB))
+private fun analysisPosition(samples: Double, rate: Double?): String = if (rate != null && samples.isFinite()) String.format(Locale.ROOT, "%.3f s", samples / rate) else String.format(Locale.ROOT, "%.0f Samples", samples)
+
 @Composable
 private fun TrackCard(track: Track, enabled: Boolean, click: () -> Unit) {
     Card(onClick = click, enabled = enabled, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {

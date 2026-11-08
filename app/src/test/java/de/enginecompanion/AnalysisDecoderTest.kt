@@ -1,6 +1,8 @@
 package de.enginecompanion
 
 import de.enginecompanion.data.AnalysisDecoder
+import de.enginecompanion.data.BeatGrid
+import de.enginecompanion.data.BeatMarker
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,6 +29,14 @@ class AnalysisDecoderTest {
         val raw = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(10_001).array()
         val error = runCatching { AnalysisDecoder.decode(null, null, raw) }.exceptionOrNull()
         assertTrue(error is IllegalArgumentException)
+    }
+
+    @Test fun derivesBpmFromConfirmedBeatgridRelationship() {
+        val grid = BeatGrid(44_100.0, true, emptyList(), listOf(
+            BeatMarker(-1.548 * 44_100, -4, 569),
+            BeatMarker(239.814 * 44_100, 565, 0)
+        ))
+        assertEquals(141.448, AnalysisDecoder.estimatedBpm(grid)!!, 0.002)
     }
 
     private fun beatData(): ByteArray {

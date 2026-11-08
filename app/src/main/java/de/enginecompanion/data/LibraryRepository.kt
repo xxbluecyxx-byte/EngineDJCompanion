@@ -6,6 +6,7 @@ import de.enginecompanion.storage.Snapshot
 import java.io.File
 
 class LibraryRepository(private val context: Context) {
+    data class TrackDetailReport(val text: String, val analysis: TrackAnalysis?)
     data class Library(
         val directory: File,
         val schema: DbSchema,
@@ -79,7 +80,9 @@ class LibraryRepository(private val context: Context) {
             Page(tracks.take(limit), total, listOfNotNull(playlist?.let(library.playlistWarnings::get), if (missing > 0) "$missing Playlist-Track-IDs fehlen in Track." else null).joinToString("\n").ifEmpty { null })
         }
     }
-    fun details(library: Library, track: Track): String = buildString {
+    fun details(library: Library, track: Track): TrackDetailReport {
+        var decodedAnalysis: TrackAnalysis? = null
+        val text = buildString {
         appendLine("Track-ID: ${track.id}")
         appendLine("Titel: ${track.title}")
         appendLine("Interpret: ${track.artist ?: "—"}")
@@ -118,7 +121,7 @@ class LibraryRepository(private val context: Context) {
                                         if (c.isNull(2)) null else c.getBlob(2)
                                     )
                                 }
-                                decoded.onSuccess { append(AnalysisDecoder.report(it)) }
+                                decoded.onSuccess { analysis -> decodedAnalysis = analysis; append(AnalysisDecoder.report(analysis)) }
                                     .onFailure { appendLine("Analyse-Daten nicht dekodiert: ${it.message ?: it.javaClass.simpleName}") }
                             }
                         }
@@ -126,6 +129,8 @@ class LibraryRepository(private val context: Context) {
                 }
             }
         }
-        appendLine("\nDie Hex-Präfixe dienen ausschließlich der Formaterkennung. Cue-Zeitpunkte, Loop-Grenzen und Waveforms werden erst nach Vergleich mit bekannten echten Trackdaten dekodiert.")
+        appendLine("\nDie Hex-Präfixe dienen ausschließlich der Formaterkennung. Hot Cues, gespeicherte Loops und Beatgrid wurden am Prime 4+ praktisch bestätigt; Waveforms sind weiterhin nicht dekodiert.")
+        }
+        return TrackDetailReport(text, decodedAnalysis)
     }
 }

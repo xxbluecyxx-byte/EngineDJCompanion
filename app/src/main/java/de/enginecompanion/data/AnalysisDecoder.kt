@@ -23,6 +23,16 @@ object AnalysisDecoder {
         return TrackAnalysis(grid, cueResult?.first.orEmpty(), savedLoops, cueResult?.second)
     }
 
+    fun estimatedBpm(grid: BeatGrid): Double? {
+        val markers = grid.adjustedMarkers.ifEmpty { grid.defaultMarkers }
+        if (markers.size < 2 || !grid.sampleRate.isFinite() || grid.sampleRate <= 0) return null
+        val first = markers.first()
+        val last = markers.last()
+        val seconds = (last.sampleOffset - first.sampleOffset) / grid.sampleRate
+        val beats = last.beatNumber - first.beatNumber
+        return (beats * 60.0 / seconds).takeIf { it.isFinite() && it > 0 }
+    }
+
     fun report(analysis: TrackAnalysis): String = buildString {
         val rate = analysis.beatGrid?.sampleRate?.takeIf { it.isFinite() && it > 0 }
         appendLine("Dekodierte Analyse-Daten (nur lesend):")
