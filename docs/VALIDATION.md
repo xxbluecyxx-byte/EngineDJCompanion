@@ -1,6 +1,6 @@
 # Validierung — 8. November 2026
 
-Aktueller Entwicklungsstand: `0.5.0-readonly` (Version Code 12). Hot-Cue-, Loop- und Beatgrid-Positionen aus 0.4.0 wurden auf dem Prime 4+ praktisch bestätigt; 0.5.0 wird nach dem Push durch GitHub CI geprüft.
+Aktueller Entwicklungsstand: `0.5.1-readonly` (Version Code 13). Hot-Cue-, Loop- und Beatgrid-Positionen aus 0.4.0 wurden auf dem Prime 4+ praktisch bestätigt; 0.5.1 wird nach dem Push durch GitHub CI geprüft.
 
 ```
 ./gradlew clean assembleDebug testDebugUnitTest lintDebug
@@ -50,6 +50,10 @@ Die lokale USB-Zuordnung verwendet nun denselben bestätigten Herkunftsschlüsse
 ## Änderung 0.5.0
 
 Die praktisch bestätigten Analysewerte erscheinen als eigene Performance-Sektion: farbige Hot-Cue- und Loop-Karten, Main Cue, Sekundenpositionen und Beatgrid-Marker. Ein Kontroll-BPM wird unabhängig aus Sample-Rate sowie erstem und letztem Marker berechnet. Beim validierten Track ergaben 569 Beats über 241,362 Sekunden 141,448 BPM und bestätigten damit den gespeicherten Analysewert. Der vollständige technische Bericht bleibt darunter sichtbar und exportierbar.
+
+## Änderung 0.5.1
+
+Debug-APKs aus lokalen Builds und GitHub Actions verwenden einen festen Projektschlüssel. Damit akzeptiert Android nach dem einmaligen Wechsel alle folgenden APKs als Update und erhält App-Daten einschließlich EngineX-Konfiguration. Zertifikat-SHA-256: `01:02:33:AB:10:91:45:19:F9:98:61:32:C7:60:78:A5:B4:68:98:EA:E2:B6:D3:EB:4E:1C:7A:C9:75:D1:63:34`. Der öffentliche Schlüssel ist nur für interne Debug-Builds vorgesehen; Release-Signierung bleibt ausdrücklich getrennt.
 
 ## Änderung 0.3.0
 

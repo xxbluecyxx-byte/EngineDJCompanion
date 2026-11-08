@@ -35,6 +35,8 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`.
 Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dateimanager erlauben. Alternativ `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
 `local.properties` wird durch Android Studio erzeugt; keine externen Laufwerkspfade sind fest codiert.
 
+Ab Version 0.5.1 verwendet jeder Debug-Build denselben eingecheckten Debug-Schlüssel. Beim einmaligen Wechsel von älteren, durch wechselnde GitHub-Runner signierten APKs muss die vorhandene App noch einmal deinstalliert werden. Danach lassen sich neue Debug-APKs direkt als Update installieren; private App-Daten und der verschlüsselt gespeicherte EngineX-Zugang bleiben erhalten. Der Schlüssel ist ausdrücklich öffentlich und darf niemals für einen Release-Build oder eine Veröffentlichung im Play Store verwendet werden.
+
 ## Funktionen
 
 - SAF-Ordnerwahl, dauerhafte Lesefreigabe soweit vom Provider erlaubt, manuelle Erreichbarkeitsprüfung.
@@ -77,3 +79,4 @@ Maximal 4 GiB Import, mindestens doppelte DB-Größe plus Arbeitsraum intern nö
 - MainActivity: native Compose-Oberfläche und expliziter Diagnosedateiexport.
 
 Siehe docs/COMPATIBILITY.md und docs/VALIDATION.md.
+Der weitere Weg vom Explorer zum WLAN-Player und sicheren Editor steht in `docs/ROADMAP.md`.
