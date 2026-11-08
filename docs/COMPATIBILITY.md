@@ -12,11 +12,16 @@ Referenz: libdjinterop, Commit 597be49121abf175f5347662e425ae28a463d922. Eigene 
 - https://github.com/xsco/libdjinterop/blob/597be49121abf175f5347662e425ae28a463d922/src/djinterop/engine/v2/playlist_impl.cpp
 - https://github.com/xsco/libdjinterop/blob/597be49121abf175f5347662e425ae28a463d922/src/djinterop/engine/v2/convert_track.hpp
 - https://github.com/xsco/libdjinterop/blob/597be49121abf175f5347662e425ae28a463d922/include/djinterop/musical_key.hpp
+- https://github.com/xsco/libdjinterop/blob/bd1e417759c19eae1ad5dbd7173bb4bc47d6f7c2/src/djinterop/engine/v2/quick_cues_blob.cpp
+- https://github.com/xsco/libdjinterop/blob/bd1e417759c19eae1ad5dbd7173bb4bc47d6f7c2/src/djinterop/engine/v2/loops_blob.cpp
+- https://github.com/xsco/libdjinterop/blob/bd1e417759c19eae1ad5dbd7173bb4bc47d6f7c2/src/djinterop/engine/v2/beat_data_blob.cpp
 - https://support.enginedj.com/support/solutions/articles/69000834165
 
 Herstellerdokumentation und neuere Schema-Referenz verwenden unterschiedliche Schreibweisen der Origin-Felder. Die App erhält diese Rohwerte unverändert. Synchronisierungsschlüssel werden erst anhand echter Daten festgelegt. Track.id allein ist dafür nicht ausreichend.
 
 Key 0–23 wird als dokumentierte Tonart dargestellt; reguläres Rating 0–100 in 20er-Schritten als Sterne plus Rohwert. Unbekannte Werte werden nicht geklemmt oder umgedeutet.
+
+Der Analyse-Decoder folgt den oben gepinnten binären Leseformaten: Qt-/zlib-Längenpräfix für `quickCues` und `beatData`, unkomprimiertes `loops`, explizite Byte-Reihenfolgen sowie Sample-Positionen. Größen, Eintragszahlen und jedes Feld werden vor dem Lesen begrenzt. Decoderfehler bleiben pro Track sichtbar und brechen den Library-Import nicht ab.
 
 ## Bitte bereitstellen
 

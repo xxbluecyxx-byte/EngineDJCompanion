@@ -1,6 +1,6 @@
 # Validierung — 8. November 2026
 
-Aktueller Entwicklungsstand: `0.3.4-readonly` (Version Code 9). Die unten aufgeführten Build-Ergebnisse stammen aus der Validierung von 0.3.0; 0.3.4 wird nach dem Push durch den Android-CI-Workflow erneut geprüft.
+Aktueller Entwicklungsstand: `0.4.0-readonly` (Version Code 10). Der GitHub-CI-Lauf für 0.3.3 war vollständig erfolgreich; 0.4.0 wird nach dem Push erneut geprüft.
 
 ```
 ./gradlew clean assembleDebug testDebugUnitTest lintDebug
@@ -38,6 +38,10 @@ Die bestätigte Engine-Tonartskala 0–23 wird in den Trackkarten als Camelot 1A
 ## Änderung 0.3.4
 
 Trackdetails öffnen als eigene vollflächige Ansicht und formatieren Dauer und BPM konsistent. Der Bericht kann als Textdatei exportiert werden. Bei einer lokalen USB-/Backup-Momentaufnahme enthält er für vorhandene `PerformanceData`-BLOBs ausschließlich Spaltenname, Länge und ein auf 64 Byte begrenztes Hex-Präfix. Diese nachweisbaren Rohdaten bilden die Grundlage für die spätere Cue-/Loop-/Beatgrid-Analyse; es findet noch keine Interpretation oder Änderung statt.
+
+## Änderung 0.4.0
+
+Ein eigenständiger, strikt lesender Decoder verarbeitet die von `libdjinterop` dokumentierten Engine-3.x-Strukturen für Hot Cues, gespeicherte Loops und Beatgrids. Komprimierte Daten erhalten ein festes 64-MiB-Limit; Eintragszahlen, Feldgrenzen und unkomprimierte Länge werden geprüft. Sample-Positionen erscheinen anhand der im Beatgrid gespeicherten Sample-Rate in Sekunden. Synthetische Binärfixtures prüfen Big-/Little-Endian-Felder, Qt-/zlib-Dekompression, Cue-/Loop-Zeitumrechnung und die Ablehnung unplausibler Eintragszahlen. Die praktische Übereinstimmung mit bekannten Markern auf dem Prime steht noch aus.
 
 ## Änderung 0.3.0
 

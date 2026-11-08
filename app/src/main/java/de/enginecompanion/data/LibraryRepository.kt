@@ -98,6 +98,22 @@ class LibraryRepository(private val context: Context) {
                             if (!c.isNull(prefixIndex) && c.getString(prefixIndex).isNotEmpty()) appendLine("  Präfix (max. 64 Bytes, hex): ${c.getString(prefixIndex)}")
                         }
                     }
+                    if (schema.has("PerformanceData", "trackId", "beatData", "quickCues", "loops")) {
+                        db.rawQuery("SELECT beatData,quickCues,loops FROM PerformanceData WHERE trackId=?", arrayOf(track.id.toString())).use { c ->
+                            if (c.moveToFirst()) {
+                                appendLine()
+                                val decoded = runCatching {
+                                    AnalysisDecoder.decode(
+                                        if (c.isNull(0)) null else c.getBlob(0),
+                                        if (c.isNull(1)) null else c.getBlob(1),
+                                        if (c.isNull(2)) null else c.getBlob(2)
+                                    )
+                                }
+                                decoded.onSuccess { append(AnalysisDecoder.report(it)) }
+                                    .onFailure { appendLine("Analyse-Daten nicht dekodiert: ${it.message ?: it.javaClass.simpleName}") }
+                            }
+                        }
+                    }
                 }
             }
         }

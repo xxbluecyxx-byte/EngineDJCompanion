@@ -48,6 +48,7 @@ Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dat
 - Tracklisten zeigen geladene und vollständige Trefferzahl getrennt; weitere Ergebnisse werden in 200er-Schritten geladen.
 - Trackdetails einschließlich tatsächlicher Rohmetadaten und PerformanceData-BLOB-Längen.
 - Vollflächige Trackdetails mit exportierbarem, trackbezogenem Analysebericht; BLOBs werden nur mit Länge und maximal 64 Byte Hex-Präfix erfasst.
+- Strikt lesender Decoder für die bestätigten Engine-3.x-Strukturen `quickCues`, `loops` und `beatData`; Sample-Positionen werden mit der gespeicherten Sample-Rate als Sekunden dargestellt.
 - Authentifizierte EngineX-LAN-Erkennung, verschlüsselte Zugangsdaten und private Offline-Momentaufnahme.
 - Wechsel zwischen lokaler USB-Momentaufnahme und EngineX-WLAN-Momentaufnahme.
 - Aufklappbarer Playlist-Baum mit gespeichertem Zustand, visueller Ordner-/Playlist-Unterscheidung, Playlist-Suche und rekursiven Trackzahlen für EngineX- und USB-Momentaufnahmen.
@@ -56,7 +57,7 @@ Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dat
 
 USB-Import und EngineX-WLAN-Synchronisierung wurden auf dem ASUS ROG Phone 9 Pro mit der internen SSD des Prime 4+ praktisch bestätigt. Echte Tracks, Playlist-Baum, Zuordnungen und native Reihenfolge werden angezeigt; die WLAN-Momentaufnahme mit 7401 Tracks und 48 Playlists bleibt offline verfügbar.
 
-Cues, Loops, Beatgrids und Waveforms werden noch nicht binär dekodiert. Es werden nur vorhandene Metadaten/Byteanzahlen angezeigt. Kein Editor, keine Wiedergabe und keine Synchronisierung. Smartlists werden nicht ausgewertet.
+Hot Cues, gespeicherte Loops und Beatgrid-Marker werden bei lokalen Schema-3.x-Momentaufnahmen dekodiert, benötigen aber noch den Vergleich mit echten, am Prime bekannten Markern. Waveforms werden noch nicht dekodiert. Kein Editor, keine Wiedergabe und keine Synchronisierung. Smartlists werden nicht ausgewertet.
 
 SAF bietet keine atomare Sperre mehrerer Dateien. Doppelte Hash-Prüfung erkennt beobachtete Änderungen, ersetzt aber keine ruhende Quelle. Nicht während paralleler Schreibzugriffe importieren. Im Prime-Computer-Modus wird kein gleichzeitiger Engine-OS-Zugriff unterstellt.
 
