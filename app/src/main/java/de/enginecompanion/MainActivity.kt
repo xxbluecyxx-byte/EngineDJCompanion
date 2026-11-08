@@ -332,7 +332,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         state.detailMedia?.let { media ->
-                            WlanPlayer(media, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy)
+                            WlanPlayer(media, state.detailTrack, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy)
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
                         state.detailAnalysis?.let { analysis ->
@@ -351,7 +351,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean) {
+private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember(media.url, media.authorization) {
         val http = DefaultHttpDataSource.Factory()
@@ -374,8 +374,14 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     val gridPreferences = remember(context) { context.getSharedPreferences("beatgrid-drafts", 0) }
     val gridDraftKey = remember(media.url) { (media.url.hashCode().toLong() and 0xffffffffL).toString(16) }
     val cuePreferences = remember(context) { context.getSharedPreferences("hot-cue-drafts", 0) }
+    val tagPreferences = remember(context) { context.getSharedPreferences("tag-drafts", 0) }
     val primeCues = analysis?.cues.orEmpty()
     var playerCues by remember(media.url, primeCues) { mutableStateOf(readCueDraft(cuePreferences.getString(gridDraftKey, null), primeCues)) }
+    var tagTitle by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.title", null) ?: track?.title.orEmpty()) }
+    var tagArtist by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.artist", null) ?: track?.artist.orEmpty()) }
+    var tagAlbum by remember(media.url, track) { mutableStateOf(tagPreferences.getString("$gridDraftKey.album", null) ?: track?.album.orEmpty()) }
+    var tagRating by remember(media.url, track) { mutableIntStateOf(tagPreferences.getInt("$gridDraftKey.rating", track?.rating?.toIntOrNull() ?: 0)) }
+    val tagsChanged = track != null && (tagTitle != track.title || tagArtist != track.artist.orEmpty() || tagAlbum != track.album.orEmpty() || tagRating != (track.rating?.toIntOrNull() ?: 0))
     val cuesChanged = playerCues != primeCues
     val playerAnalysis = analysis?.copy(cues = playerCues)
     var gridBpm by remember(media.url, primeGridBpm) { mutableStateOf(gridPreferences.getString("$gridDraftKey.bpm", null)?.toDoubleOrNull() ?: primeGridBpm) }
@@ -395,6 +401,18 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
     LaunchedEffect(playerCues, primeCues, gridDraftKey) {
         cuePreferences.edit().apply {
             if (playerCues != primeCues) putString(gridDraftKey, writeCueDraft(playerCues)) else remove(gridDraftKey)
+        }.apply()
+    }
+    LaunchedEffect(tagTitle, tagArtist, tagAlbum, tagRating, tagsChanged, gridDraftKey) {
+        tagPreferences.edit().apply {
+            if (tagsChanged) {
+                putString("$gridDraftKey.title", tagTitle)
+                putString("$gridDraftKey.artist", tagArtist)
+                putString("$gridDraftKey.album", tagAlbum)
+                putInt("$gridDraftKey.rating", tagRating)
+            } else {
+                remove("$gridDraftKey.title"); remove("$gridDraftKey.artist"); remove("$gridDraftKey.album"); remove("$gridDraftKey.rating")
+            }
         }.apply()
     }
     DisposableEffect(player) {
@@ -473,6 +491,12 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             gridOffsetMs = gridOffsetMs,
             playheadMs = position,
             cuesChanged = cuesChanged,
+            track = track,
+            tagTitle = tagTitle,
+            tagArtist = tagArtist,
+            tagAlbum = tagAlbum,
+            tagRating = tagRating,
+            tagsChanged = tagsChanged,
             quantizeEnabled = quantizeEnabled,
             enabled = ready,
             onCue = { samples ->
@@ -514,6 +538,8 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             },
             onDeleteCue = { number -> playerCues = playerCues.filterNot { it.number == number } },
             onResetCues = { playerCues = primeCues },
+            onTags = { title, artist, album, rating -> tagTitle = title; tagArtist = artist; tagAlbum = album; tagRating = rating },
+            onResetTags = { tagTitle = track?.title.orEmpty(); tagArtist = track?.artist.orEmpty(); tagAlbum = track?.album.orEmpty(); tagRating = track?.rating?.toIntOrNull() ?: 0 },
             onQuantize = { quantizeEnabled = it },
             onGridBpm = { gridBpm = it.coerceIn(20.0, 400.0) },
             onGridOffset = { gridOffsetMs = it.coerceIn(-30_000L, 30_000L) },
@@ -532,6 +558,12 @@ private fun PlayerPerformancePads(
     gridOffsetMs: Long,
     playheadMs: Long,
     cuesChanged: Boolean,
+    track: Track?,
+    tagTitle: String,
+    tagArtist: String,
+    tagAlbum: String,
+    tagRating: Int,
+    tagsChanged: Boolean,
     quantizeEnabled: Boolean,
     enabled: Boolean,
     onCue: (Double) -> Unit,
@@ -539,6 +571,8 @@ private fun PlayerPerformancePads(
     onSetCue: (Int, Boolean) -> Unit,
     onDeleteCue: (Int) -> Unit,
     onResetCues: () -> Unit,
+    onTags: (String, String, String, Int) -> Unit,
+    onResetTags: () -> Unit,
     onQuantize: (Boolean) -> Unit,
     onGridBpm: (Double) -> Unit,
     onGridOffset: (Long) -> Unit,
@@ -548,6 +582,7 @@ private fun PlayerPerformancePads(
     SecondaryTabRow(selectedTabIndex = selectedTool, modifier = Modifier.padding(top = 16.dp)) {
         Tab(selected = selectedTool == 0, onClick = { selectedTool = 0 }, text = { Text("Hot Cues") })
         Tab(selected = selectedTool == 1, onClick = { selectedTool = 1 }, text = { Text("Beatgrid") })
+        Tab(selected = selectedTool == 2, onClick = { selectedTool = 2 }, text = { Text("Tags") })
     }
     if (selectedTool == 1) {
         BeatgridControls(
@@ -560,6 +595,10 @@ private fun PlayerPerformancePads(
             onOffset = onGridOffset,
             onReset = onGridReset
         )
+        return
+    }
+    if (selectedTool == 2) {
+        TrackTagEditor(track, tagTitle, tagArtist, tagAlbum, tagRating, tagsChanged, onTags, onResetTags)
         return
     }
     var cueMode by rememberSaveable { mutableIntStateOf(0) }
@@ -619,6 +658,43 @@ private fun PlayerPerformancePads(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun TrackTagEditor(
+    track: Track?,
+    title: String,
+    artist: String,
+    album: String,
+    rating: Int,
+    changed: Boolean,
+    onChange: (String, String, String, Int) -> Unit,
+    onReset: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column {
+                Text("Trackdaten", fontWeight = FontWeight.SemiBold)
+                Text(if (changed) "Lokaler Entwurf gespeichert" else "Unverändert vom Prime", color = if (changed) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            }
+            if (changed) TextButton(onClick = onReset) { Text("Prime-Tags") }
+        }
+        OutlinedTextField(title, { onChange(it, artist, album, rating) }, label = { Text("Titel") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(artist, { onChange(title, it, album, rating) }, label = { Text("Interpret") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(album, { onChange(title, artist, it, rating) }, label = { Text("Album") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("Bewertung", fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            repeat(5) { index ->
+                val starValue = (index + 1) * 20
+                TextButton(onClick = { onChange(title, artist, album, if (rating == starValue) 0 else starValue) }) {
+                    Text(if (rating >= starValue) "★" else "☆", style = MaterialTheme.typography.headlineMedium, color = if (rating >= starValue) Color(0xFFFFD54F) else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Text("${rating / 20} von 5 Sternen", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Der Entwurf bleibt auf diesem Handy gespeichert. Schreiben zum Prime folgt erst mit einem abgesicherten WLAN-Schreibdienst.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (track == null) Text("Für diesen Track sind keine WLAN-Metadaten verfügbar.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
 }
 
