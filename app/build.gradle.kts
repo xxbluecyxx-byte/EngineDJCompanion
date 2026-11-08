@@ -6,8 +6,8 @@ android {
         applicationId = "de.enginecompanion"
         minSdk = 28
         targetSdk = 36
-        versionCode = 29
-        versionName = "0.16.0-beatgrid-sync"
+        versionCode = 30
+        versionName = "0.16.1-grid-state"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
