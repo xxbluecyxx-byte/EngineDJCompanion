@@ -110,7 +110,6 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
-    val scope = rememberCoroutineScope()
     LaunchedEffect(vm) { onUsbRefreshAvailable(vm::refreshUsb) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) result.data?.let { data -> data.data?.let { vm.import(it, data.flags) } }
@@ -356,6 +355,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 @Composable
 private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     val player = remember(media.url, media.authorization) {
         val http = DefaultHttpDataSource.Factory()
             .setDefaultRequestProperties(mapOf("Authorization" to media.authorization))
