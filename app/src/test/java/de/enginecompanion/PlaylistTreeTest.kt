@@ -2,6 +2,7 @@ package de.enginecompanion
 
 import de.enginecompanion.data.Playlist
 import de.enginecompanion.data.PlaylistTree
+import de.enginecompanion.data.PlaylistCounts
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -26,5 +27,20 @@ class PlaylistTreeTest {
     @Test fun invalidChainFallsBackToTitle() {
         val broken = listOf(Playlist(2, "Zulu", null, 99), Playlist(1, "Alpha", null, 99))
         assertEquals(listOf("Alpha", "Zulu"), PlaylistTree.flatten(broken, emptySet()).map { it.playlist.title })
+    }
+
+    @Test fun recursiveCountsIncludeLocalPlaylistEntries() {
+        val counts = PlaylistCounts.recursive(rows, mapOf(1L to listOf(7), 10L to listOf(8, 9), 11L to listOf(9, 9), 3L to emptyList()))
+        assertEquals(4, counts[1])
+        assertEquals(2, counts[10])
+        assertEquals(1, counts[11])
+        assertEquals(0, counts[3])
+    }
+
+    @Test fun recursiveCountsSurviveBrokenParentCycles() {
+        val cyclic = listOf(Playlist(1, "A", 2), Playlist(2, "B", 1))
+        val counts = PlaylistCounts.recursive(cyclic, mapOf(1L to listOf(10), 2L to listOf(20)))
+        assertEquals(2, counts[1])
+        assertEquals(1, counts[2])
     }
 }

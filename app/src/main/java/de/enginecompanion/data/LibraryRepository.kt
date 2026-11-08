@@ -6,7 +6,14 @@ import de.enginecompanion.storage.Snapshot
 import java.io.File
 
 class LibraryRepository(private val context: Context) {
-    data class Library(val directory: File, val schema: DbSchema, val adapter: EngineAdapter?, val playlists: List<Playlist>, val diagnostics: String)
+    data class Library(
+        val directory: File,
+        val schema: DbSchema,
+        val adapter: EngineAdapter?,
+        val playlists: List<Playlist>,
+        val playlistTracks: Map<Long, List<Long>>,
+        val diagnostics: String
+    )
     data class Page(val tracks: List<Track>, val warning: String? = null)
     private val preferences = context.getSharedPreferences("library", Context.MODE_PRIVATE)
     private fun open(file: File) = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS).apply { execSQL("PRAGMA query_only=ON") }
@@ -39,8 +46,15 @@ class LibraryRepository(private val context: Context) {
         val adapter = AdapterRegistry.resolve(schema)
         report.appendLine("Adapter: ${adapter?.label ?: "UNBEKANNT – kein semantischer Import"}")
         report.appendLine("Gerätevalidierung: ausstehend. Smartlists nicht ausgewertet. Cues/Loops/Beatgrid: Binärdaten nicht dekodiert.")
-        val playlists = if (adapter == null) emptyList() else open(File(directory, "working/m.db")).use { adapter.playlists(it) }
-        return Library(directory, schema, adapter, playlists, report.toString())
+        val (playlists, playlistTracks) = if (adapter == null) emptyList<Playlist>() to emptyMap() else open(File(directory, "working/m.db")).use { db ->
+            val lists = adapter.playlists(db)
+            val members = lists.associate { playlist ->
+                val local = MembershipResolver.local(adapter.members(db, playlist.id).members, schema.uuid)
+                playlist.id to local.map(Membership::trackId).distinct()
+            }
+            lists to members
+        }
+        return Library(directory, schema, adapter, playlists, playlistTracks, report.toString())
     }
     fun tracks(library: Library, playlist: Long?, query: String, sort: String, limit: Int): Page {
         val adapter = library.adapter ?: return Page(emptyList())

@@ -52,14 +52,9 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
         )
     ) { mutableStateListOf<Long>() }
     var playlistSearch by rememberSaveable { mutableStateOf("") }
-    val trackCounts = remember(shownPlaylists, state.remoteLibrary) {
-        val remote = state.remoteLibrary?.playlistTracks.orEmpty()
-        val byParent = shownPlaylists.groupBy { it.parent?.takeIf { p -> p != 0L } }
-        fun count(id: Long): Int {
-            val direct = remote[id]?.size ?: 0
-            return direct + byParent[id].orEmpty().sumOf { count(it.id) }
-        }
-        shownPlaylists.associate { it.id to count(it.id) }
+    val directPlaylistTracks = if (state.remoteActive) state.remoteLibrary?.playlistTracks.orEmpty() else state.library?.playlistTracks.orEmpty()
+    val trackCounts = remember(shownPlaylists, directPlaylistTracks) {
+        PlaylistCounts.recursive(shownPlaylists, directPlaylistTracks)
     }
     val playlistRows = remember(shownPlaylists, expandedPlaylists.toList(), playlistSearch) {
         val expanded = expandedPlaylists.toSet()
@@ -225,7 +220,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                     LazyColumn(contentPadding = PaddingValues(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         items(playlistRows, key = { it.playlist.id }) { row ->
                             val playlist = row.playlist
-                            val directCount = state.remoteLibrary?.playlistTracks?.get(playlist.id)?.size
+                            val directCount = directPlaylistTracks[playlist.id]?.size
                             val totalCount = trackCounts[playlist.id] ?: directCount
                             val isFolder = row.hasChildren
                             val expanded = playlist.id in expandedPlaylists

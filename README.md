@@ -20,9 +20,9 @@ Für **Library über WLAN aktualisieren** benötigt EngineX zusätzlich den mitg
 
 ## Bauen und Installieren
 
-Android Studio mit Unterstützung für AGP 9.3, JDK 17, SDK API 37 und Build Tools 36.0.0. Gradle 9.5.0 Wrapper liegt nach Projektvorbereitung bei. USB-Massenspeicher wird während der App-Nutzung erkannt; der Dateizugriff erfolgt weiterhin ausschließlich nach ausdrücklicher SAF-Ordnerfreigabe.
+Android Studio mit Unterstützung für AGP 9.3, JDK 17, SDK API 36 und Build Tools 36.0.0. Gradle 9.5.0 Wrapper liegt nach Projektvorbereitung bei. USB-Massenspeicher wird während der App-Nutzung erkannt; der Dateizugriff erfolgt weiterhin ausschließlich nach ausdrücklicher SAF-Ordnerfreigabe.
 
-Versionierte Abhängigkeiten: Kotlin Compose-Compiler 2.3.21, Compose BOM 2026.09.00, Activity 1.13.0, Lifecycle 2.10.0, DocumentFile 1.1.0, Coroutines 1.10.2.
+Versionierte Abhängigkeiten: Kotlin Compose-Compiler 2.3.21, Compose BOM 2025.10.00, Activity 1.10.1, Lifecycle 2.10.0, DocumentFile 1.1.0, Coroutines 1.10.2.
 
 Projekt in Android Studio öffnen, SDK installieren und Gradle Sync ausführen.
 
@@ -47,19 +47,19 @@ Installation: APK auf dem Telefon öffnen, Installation für den verwendeten Dat
 - Trackdetails einschließlich tatsächlicher Rohmetadaten und PerformanceData-BLOB-Längen.
 - Authentifizierte EngineX-LAN-Erkennung, verschlüsselte Zugangsdaten und private Offline-Momentaufnahme.
 - Wechsel zwischen lokaler USB-Momentaufnahme und EngineX-WLAN-Momentaufnahme.
-- Aufklappbarer Playlist-Baum mit gespeichertem Zustand, visueller Ordner-/Playlist-Unterscheidung, Playlist-Suche und rekursiven Trackzahlen (EngineX).
+- Aufklappbarer Playlist-Baum mit gespeichertem Zustand, visueller Ordner-/Playlist-Unterscheidung, Playlist-Suche und rekursiven Trackzahlen für EngineX- und USB-Momentaufnahmen.
 
 ## Grenzen
 
-Der USB-Import wurde auf dem ASUS ROG Phone 9 Pro mit der internen SSD des Prime 4+ praktisch bestätigt: echte Tracks und Playlists werden angezeigt. Die WLAN-Erweiterung wurde gebaut und automatisiert gegen Schema 3.0.2 geprüft, ist auf dem Prime aber noch nicht installiert oder praktisch getestet.
+USB-Import und EngineX-WLAN-Synchronisierung wurden auf dem ASUS ROG Phone 9 Pro mit der internen SSD des Prime 4+ praktisch bestätigt. Echte Tracks, Playlist-Baum, Zuordnungen und native Reihenfolge werden angezeigt; die WLAN-Momentaufnahme mit 7401 Tracks und 48 Playlists bleibt offline verfügbar.
 
-Cues, Loops, Beatgrids und Waveforms werden noch nicht binär dekodiert. Es werden nur vorhandene Metadaten/Byteanzahlen angezeigt. Kein Editor, keine Wiedergabe und keine Synchronisierung. Smartlists werden nicht ausgewertet. Playlist-Eltern-IDs werden angezeigt, noch keine Baum-Navigation.
+Cues, Loops, Beatgrids und Waveforms werden noch nicht binär dekodiert. Es werden nur vorhandene Metadaten/Byteanzahlen angezeigt. Kein Editor, keine Wiedergabe und keine Synchronisierung. Smartlists werden nicht ausgewertet.
 
 SAF bietet keine atomare Sperre mehrerer Dateien. Doppelte Hash-Prüfung erkennt beobachtete Änderungen, ersetzt aber keine ruhende Quelle. Nicht während paralleler Schreibzugriffe importieren. Im Prime-Computer-Modus wird kein gleichzeitiger Engine-OS-Zugriff unterstellt.
 
 Alle unmittelbaren .db-Dateien und zugehörigen WAL-Dateien werden kopiert. SHM wird lokal neu aufgebaut. Ein nichtleeres Rollback-Journal führt zu erklärtem Abbruch; Sidecars niemals manuell entfernen. Andere Analyse-Dateibäume werden noch nicht importiert.
 
-Maximal 4 GiB Import, mindestens doppelte DB-Größe plus Arbeitsraum intern nötig. Listen werden in 200er-Schritten bis 100.000 Ergebnissen angezeigt. Große Bibliotheken müssen noch auf dem Telefon gemessen werden. Ein Abbruch kann eine laufende SQLite-Prüfung abwarten. USB-Status wird manuell geprüft, nicht kontinuierlich überwacht.
+Maximal 4 GiB Import, mindestens doppelte DB-Größe plus Arbeitsraum intern nötig. Listen werden in 200er-Schritten bis 100.000 Ergebnissen angezeigt. Die echte WLAN-Bibliothek mit 7401 Tracks wurde auf dem Telefon geprüft; weitere Langzeit- und Speicherverbrauchsmessungen stehen aus. Ein Abbruch kann eine laufende SQLite-Prüfung abwarten. USB-Geräte werden während der App-Laufzeit und beim Zurückkehren in die App erneut geprüft.
 
 ## Architektur
 

@@ -80,6 +80,21 @@ object PlaylistTree {
         return result
     }
 }
+object PlaylistCounts {
+    fun recursive(playlists: List<Playlist>, directTrackIds: Map<Long, List<Long>>): Map<Long, Int> {
+        val byParent = playlists.groupBy { it.parent?.takeIf { parent -> parent != 0L } }
+        val memo = mutableMapOf<Long, Int>()
+        fun count(id: Long, path: Set<Long>): Int {
+            memo[id]?.let { return it }
+            if (id in path) return 0
+            val total = directTrackIds[id].orEmpty().distinct().size +
+                byParent[id].orEmpty().sumOf { child -> count(child.id, path + id) }
+            memo[id] = total
+            return total
+        }
+        return playlists.associate { it.id to count(it.id, emptySet()) }
+    }
+}
 data class Membership(val id: Long, val trackId: Long, val next: Long?, val databaseUuid: String?)
 data class OrderedMembers(val members: List<Membership>, val warning: String?)
 object PlaylistOrder {

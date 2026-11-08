@@ -1,6 +1,6 @@
-# Validierung — 7. November 2026
+# Validierung — 8. November 2026
 
-Ausgelieferte Version: `0.3.0-readonly` (Version Code 5).
+Aktueller Entwicklungsstand: `0.3.2-readonly` (Version Code 7). Die unten aufgeführten Build-Ergebnisse stammen aus der Validierung von 0.3.0; 0.3.2 wird nach dem Push durch den Android-CI-Workflow erneut geprüft.
 
 ```
 ./gradlew clean assembleDebug testDebugUnitTest lintDebug
@@ -11,7 +11,7 @@ Ausgelieferte Version: `0.3.0-readonly` (Version Code 5).
 - Darunter vier EngineX-Clienttests für Adressvalidierung, Laufwerksantwort, Snapshot-Parsing und native Playlist-Reihenfolge.
 - Android Lint: 0 Fehler, 7 Warnungen (optionale neuere Testabhängigkeit, konservative Speicherplatzprüfung und optionale KTX-Schreibweisen).
 - APK: `apksigner verify` erfolgreich, APK Signature Scheme v2, ein Android-Debug-Signer.
-- Werkzeugstand: JDK 17, Gradle 9.5.0, AGP 9.3.0, Android API 37, Build Tools 36.0.0.
+- Werkzeugstand: JDK 17, Gradle 9.5.0, AGP 9.3.0, Android API 36, Build Tools 36.0.0.
 
 ## Änderung 0.2.0
 
@@ -27,13 +27,17 @@ Playlist-Zuordnungen aus der WLAN-Momentaufnahme werden wie beim validierten USB
 
 Playlist-Baum: Aufklappzustand wird über Prozessneustarts gespeichert. Ordner und echte Playlists sind visuell deutlicher getrennt (Farbe, Symbol, Schriftstärke). Playlist-Suche filtert Titel und hält Eltern sichtbar. Für EngineX-Momentaufnahmen werden Trackzahlen von Ordnern rekursiv zusammengezählt. Ordner mit eigenen Tracks bieten einen expliziten „Öffnen“-Button.
 
+## Änderung 0.3.2
+
+USB- und Backup-Momentaufnahmen erhalten jetzt dieselben direkten und rekursiven Playlist-Trackzahlen wie EngineX-WLAN-Momentaufnahmen. Die Zuordnung wird ausschließlich aus bestätigten `PlaylistEntity`-Einträgen mit passender Datenbank-UUID aufgebaut. Zwei zusätzliche Unit-Tests prüfen rekursive Zahlen, doppelte Einträge und defekte Elternzyklen. Dokumentation und tatsächlich verwendete Android-/Compose-Versionen wurden abgeglichen.
+
 ## Änderung 0.3.0
 
 Playlists werden als aufklappbarer Baum aus `parentListId` dargestellt; Geschwister folgen der tatsächlichen `nextListId`-Kette. Drei zusätzliche Unit-Tests prüfen eingeklappte und ausgeklappte Bäume sowie den sicheren Fallback bei ungültigen Ketten. Trackzeilen sind kompakter. Die WLAN-Detailansicht zeigt Dauer, übersetzte Tonart, Bewertung und alle Playlists, in denen der Track vorkommt.
 
 ## Bereits bestätigter Gerätestand
 
-Der bisherige USB-Build wurde auf ASUS ROG Phone 9 Pro und Prime 4+ praktisch geprüft. Android erkennt den USB-Speicher; nach SAF-Freigabe zeigt die App reale Tracks und Playlists. Die neue WLAN-Version und das EngineX-Binary wurden noch nicht auf den Geräten installiert.
+USB-Import und EngineX-WLAN-Synchronisierung wurden auf ASUS ROG Phone 9 Pro und Prime 4+ praktisch geprüft. Android erkennt den USB-Speicher; nach SAF-Freigabe zeigt die App reale Tracks und Playlists. Der EngineX-Companion-Endpunkt liefert eine echte Momentaufnahme mit 7401 Tracks und 48 Playlists. Die korrigierte Zuordnung über Herkunfts-UUID und Track-ID sowie die native Playlist-Reihenfolge wurden mit einer Playlist am Prime verglichen.
 
 ## Änderung 0.1.1
 
@@ -43,4 +47,4 @@ Die USB-Erkennung gewährt keinen Dateizugriff und öffnet keine Linux-Pfade. De
 
 ## Noch nicht geprüft
 
-EngineX-Companion-Endpunkt und WLAN-Download müssen noch auf dem Prime 4+ beziehungsweise dem ASUS praktisch geprüft werden. Unbekannte Datenbankschemata werden nur diagnostiziert. Cues, Loops, Beatgrids und Waveforms werden weiterhin nicht dekodiert; Bearbeitung und bidirektionale Synchronisierung sind nicht implementiert.
+Unbekannte Datenbankschemata werden nur diagnostiziert. Cues, Loops, Beatgrids und Waveforms werden weiterhin nicht dekodiert; Bearbeitung und bidirektionale Synchronisierung sind nicht implementiert. Langzeitverhalten, sehr große Playlist-Bäume und Wiederanlauf nach WLAN-Abbruch benötigen weitere Gerätetests.
