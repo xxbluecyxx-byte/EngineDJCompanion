@@ -12,6 +12,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.*
@@ -371,18 +373,23 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?) {
         while (true) {
             position = player.currentPosition.coerceAtLeast(0L)
             duration = player.duration.coerceAtLeast(0L)
-            delay(if (playing) 200 else 500)
+            delay(if (playing) 16 else 100)
         }
     }
     Text("WLAN Player", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     Text("Audio wird direkt und schreibgeschützt vom Prime gestreamt.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     analysis?.waveform?.let { waveform ->
+        val seek: (Long) -> Unit = { requested ->
+            val target = requested.coerceIn(0L, duration.coerceAtLeast(0L))
+            position = target
+            player.seekTo(target)
+        }
         PlayerWaveforms(
             waveform = waveform,
             analysis = analysis,
             positionMs = position,
             durationMs = duration,
-            onSeek = player::seekTo
+            onSeek = seek
         )
     } ?: Surface(
         Modifier.fillMaxWidth().height(150.dp).padding(top = 10.dp),
@@ -497,20 +504,23 @@ private fun PlayerWaveforms(
     val total = waveform.points.size
     val safeDuration = durationMs.coerceAtLeast(1L)
     val progress = (positionMs.toFloat() / safeDuration).coerceIn(0f, 1f)
-    val visible = minOf(total, (total * 0.12f).toInt().coerceAtLeast(48))
+    val visible = minOf(total, (total * 0.04f).toInt().coerceAtLeast(48))
     val centerIndex = (progress * (total - 1)).toInt()
-    val startIndex = (centerIndex - visible / 2).coerceIn(0, (total - visible).coerceAtLeast(0))
-    val endIndex = (startIndex + visible).coerceAtMost(total)
+    val startIndex = centerIndex - visible / 2
+    val endIndex = startIndex + visible
     val rate = analysis.beatGrid?.sampleRate?.takeIf { it > 0 && it.isFinite() }
+    val latestPosition by rememberUpdatedState(positionMs)
 
     Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
         Canvas(
             Modifier.fillMaxWidth().height(62.dp)
                 .background(Color(0xFF04090D), RoundedCornerShape(8.dp))
                 .pointerInput(safeDuration) {
-                    detectTapGestures { tap ->
-                        onSeek((tap.x / size.width.toFloat() * safeDuration.toFloat()).toLong().coerceIn(0L, safeDuration))
-                    }
+                    fun seekAt(x: Float) = onSeek((x / size.width.toFloat() * safeDuration.toFloat()).toLong().coerceIn(0L, safeDuration))
+                    detectDragGestures(
+                        onDragStart = { seekAt(it.x) },
+                        onDrag = { change, _ -> change.consume(); seekAt(change.position.x) }
+                    )
                 }
         ) {
             val step = total.toFloat() / size.width.coerceAtLeast(1f)
@@ -531,19 +541,21 @@ private fun PlayerWaveforms(
         Canvas(
             Modifier.fillMaxWidth().height(142.dp)
                 .background(Color(0xFF020609), RoundedCornerShape(8.dp))
-                .pointerInput(startIndex, endIndex, safeDuration) {
-                    detectTapGestures { tap ->
-                        val index = startIndex + tap.x / size.width.toFloat() * (endIndex - startIndex)
-                        onSeek((index / total.toFloat() * safeDuration.toFloat()).toLong().coerceIn(0L, safeDuration))
-                    }
+                .pointerInput(safeDuration, total, visible) {
+                    var jogTarget = 0L
+                    detectHorizontalDragGestures(
+                        onDragStart = { jogTarget = latestPosition },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            val windowMs = safeDuration.toDouble() * visible / total
+                            jogTarget = (jogTarget - dragAmount / size.width * windowMs).toLong().coerceIn(0L, safeDuration)
+                            onSeek(jogTarget)
+                        }
+                    )
                 }
         ) {
             val count = (endIndex - startIndex).coerceAtLeast(1)
             val px = size.width / count
-            for (i in startIndex until endIndex) {
-                val x = (i - startIndex + 0.5f) * px
-                drawFrequencyBar(x, size.height / 2f, size.height * 0.47f, waveform.points[i], waveform)
-            }
             val windowStartMs = startIndex.toDouble() / total * safeDuration.toDouble()
             val windowEndMs = endIndex.toDouble() / total * safeDuration.toDouble()
             val grid = analysis.beatGrid
@@ -561,6 +573,11 @@ private fun PlayerWaveforms(
                     n++
                 }
             }
+            for (i in startIndex until endIndex) {
+                val point = waveform.points.getOrNull(i) ?: continue
+                val x = (i - startIndex + 0.5f) * px
+                drawFrequencyBar(x, size.height / 2f, size.height * 0.47f, point, waveform)
+            }
             analysis.cues.forEach { cue ->
                 val cueMs = if (rate != null) cue.sampleOffset / rate * 1000.0 else return@forEach
                 if (cueMs in windowStartMs..windowEndMs) {
@@ -571,7 +588,7 @@ private fun PlayerWaveforms(
             drawLine(Color.White, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), 3f)
             drawLine(Color(0xFF00E5FF), Offset(size.width / 2f - 2f, 0f), Offset(size.width / 2f - 2f, size.height), 1f)
         }
-        Text("Waveform antippen zum Springen", style = MaterialTheme.typography.labelSmall, color = Color(0xFF78909C), modifier = Modifier.padding(top = 4.dp))
+        Text("Oben Marker ziehen · unten wie ein Jog nach links oder rechts wischen", style = MaterialTheme.typography.labelSmall, color = Color(0xFF78909C), modifier = Modifier.padding(top = 4.dp))
     }
 }
 
