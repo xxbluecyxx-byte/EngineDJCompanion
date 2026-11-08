@@ -75,6 +75,8 @@ class HighResolutionWaveform(private val context: Context) {
             var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
             var encoding = AudioFormat.ENCODING_PCM_16BIT
+            var encoderDelayFrames = if (inputFormat.containsKey(MediaFormat.KEY_ENCODER_DELAY)) inputFormat.getInteger(MediaFormat.KEY_ENCODER_DELAY).coerceAtLeast(0) else 0
+            var decodedFrames = 0L
             var lowState = 0.0
             var midState = 0.0
 
@@ -101,6 +103,7 @@ class HighResolutionWaveform(private val context: Context) {
                         sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
                         encoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) format.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
+                        if (format.containsKey(MediaFormat.KEY_ENCODER_DELAY)) encoderDelayFrames = format.getInteger(MediaFormat.KEY_ENCODER_DELAY).coerceAtLeast(0)
                     }
                     MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
                     else -> if (outputIndex >= 0) {
@@ -123,12 +126,16 @@ class HighResolutionWaveform(private val context: Context) {
                                 midState += midAlpha * (mono - midState)
                                 val middle = midState - lowState
                                 val upper = mono - midState
-                                val timeUs = info.presentationTimeUs + frame.toLong() * 1_000_000L / sampleRate
-                                val bucket = (timeUs / pointDurationUs).toInt().coerceIn(0, count - 1)
-                                low[bucket] = max(low[bucket], kotlin.math.abs(lowState).toFloat())
-                                mid[bucket] = max(mid[bucket], kotlin.math.abs(middle).toFloat())
-                                high[bucket] = max(high[bucket], kotlin.math.abs(upper).toFloat())
+                                val alignedFrame = decodedFrames + frame - encoderDelayFrames
+                                if (alignedFrame >= 0) {
+                                    val timeUs = alignedFrame * 1_000_000L / sampleRate
+                                    val bucket = (timeUs / pointDurationUs).toInt().coerceIn(0, count - 1)
+                                    low[bucket] = max(low[bucket], kotlin.math.abs(lowState).toFloat())
+                                    mid[bucket] = max(mid[bucket], kotlin.math.abs(middle).toFloat())
+                                    high[bucket] = max(high[bucket], kotlin.math.abs(upper).toFloat())
+                                }
                             }
+                            decodedFrames += frames
                         }
                         outputEnded = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         decoder.releaseOutputBuffer(outputIndex, false)
@@ -148,18 +155,17 @@ class HighResolutionWaveform(private val context: Context) {
             val nonZero = values.filter { it > 0f }.sorted()
             return nonZero.getOrElse((nonZero.size * 0.995).toInt().coerceAtMost(nonZero.lastIndex)) { 1f }.coerceAtLeast(0.0001f)
         }
-        val lowRef = reference(low)
-        val midRef = reference(mid)
-        val highRef = reference(high)
-        fun byte(value: Float, reference: Float) = (value / reference * 255f).toInt().coerceIn(0, 255)
-        val points = low.indices.map { WaveformPoint(byte(low[it], lowRef), byte(mid[it], midRef), byte(high[it], highRef)) }
+        val combined = FloatArray(low.size) { index -> maxOf(low[index], mid[index] * 1.8f, high[index] * 3.2f) }
+        val commonRef = reference(combined)
+        fun byte(value: Float) = (value / commonRef * 255f).toInt().coerceIn(0, 255)
+        val points = low.indices.map { WaveformPoint(byte(low[it]), byte(mid[it] * 1.8f), byte(high[it] * 3.2f)) }
         return OverviewWaveform(samplesPerPoint, points, 255, 255, 255)
     }
 
     private fun write(file: File, waveform: OverviewWaveform) {
         val temporary = File(file.parentFile, "${file.name}.tmp")
         DataOutputStream(temporary.outputStream().buffered()).use { output ->
-            output.writeInt(1)
+            output.writeInt(2)
             output.writeDouble(waveform.samplesPerPoint)
             output.writeInt(waveform.points.size)
             waveform.points.forEach { output.writeByte(it.low); output.writeByte(it.mid); output.writeByte(it.high) }
@@ -171,7 +177,7 @@ class HighResolutionWaveform(private val context: Context) {
     private fun read(file: File): OverviewWaveform? = runCatching {
         if (!file.isFile) return null
         DataInputStream(file.inputStream().buffered()).use { input ->
-            require(input.readInt() == 1)
+            require(input.readInt() == 2)
             val samplesPerPoint = input.readDouble()
             val count = input.readInt()
             require(count in 1..120_000)

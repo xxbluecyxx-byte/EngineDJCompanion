@@ -405,9 +405,9 @@ private fun WlanPlayer(media: EngineXTrackMedia, analysis: TrackAnalysis?, detai
             analysis = analysis,
             positionMs = position,
             durationMs = duration,
+            detailLoading = waveformBusy,
             onSeek = seek
         )
-        if (waveformBusy) Text("Detail-Waveform wird einmalig aus dem Audio berechnet …", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
     } ?: Surface(
         Modifier.fillMaxWidth().height(150.dp).padding(top = 10.dp),
         color = Color(0xFF05090D),
@@ -517,6 +517,7 @@ private fun PlayerWaveforms(
     analysis: TrackAnalysis,
     positionMs: Long,
     durationMs: Long,
+    detailLoading: Boolean,
     onSeek: (Long) -> Unit
 ) {
     val total = detailedWaveform?.points?.size ?: overviewWaveform.points.size
@@ -531,8 +532,13 @@ private fun PlayerWaveforms(
     val overviewRaster by produceState<ImageBitmap?>(null, overviewWaveform) {
         value = withContext(Dispatchers.Default) { renderWaveform(overviewWaveform) }
     }
-    val detailRaster by produceState<ImageBitmap?>(null, detailedWaveform) {
-        value = detailedWaveform?.let { withContext(Dispatchers.Default) { renderWaveform(it) } }
+    val tileSize = 1024
+    val detailTiles by produceState<List<ImageBitmap>>(emptyList(), detailedWaveform) {
+        value = detailedWaveform?.let { detailed ->
+            withContext(Dispatchers.Default) {
+                detailed.points.chunked(tileSize).map { points -> renderWaveform(detailed.copy(points = points)) }
+            }
+        }.orEmpty()
     }
 
     Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
@@ -565,9 +571,11 @@ private fun PlayerWaveforms(
             drawLine(Color(0xFF00E5FF), Offset(progress * size.width, 0f), Offset(progress * size.width, size.height), 2.5f)
         }
         Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier.fillMaxWidth().height(142.dp).background(Color(0xFF020609), RoundedCornerShape(8.dp))
+        ) {
         Canvas(
-            Modifier.fillMaxWidth().height(142.dp)
-                .background(Color(0xFF020609), RoundedCornerShape(8.dp))
+            Modifier.matchParentSize()
                 .pointerInput(safeDuration, total, visible) {
                     var jogTarget = 0L
                     detectHorizontalDragGestures(
@@ -599,16 +607,23 @@ private fun PlayerWaveforms(
                     n++
                 }
             }
-            detailRaster?.let { image ->
-                val sourceStart = startIndex.coerceAtLeast(0)
-                val sourceEnd = endIndex.coerceAtMost(total)
-                if (sourceEnd > sourceStart) {
-                    val destinationStart = ((sourceStart - startIndex).toFloat() / count * size.width).toInt()
-                    val destinationWidth = ((sourceEnd - sourceStart).toFloat() / count * size.width).toInt().coerceAtLeast(1)
+            val sourceStart = startIndex.coerceAtLeast(0)
+            val sourceEnd = endIndex.coerceAtMost(total)
+            if (sourceEnd > sourceStart && detailTiles.isNotEmpty()) {
+                val firstTile = sourceStart / tileSize
+                val lastTile = (sourceEnd - 1) / tileSize
+                for (tileIndex in firstTile..lastTile) {
+                    val image = detailTiles.getOrNull(tileIndex) ?: continue
+                    val tileStart = tileIndex * tileSize
+                    val overlapStart = maxOf(sourceStart, tileStart)
+                    val overlapEnd = minOf(sourceEnd, tileStart + image.width)
+                    if (overlapEnd <= overlapStart) continue
+                    val destinationStart = ((overlapStart - startIndex).toFloat() / count * size.width).toInt()
+                    val destinationWidth = ((overlapEnd - overlapStart).toFloat() / count * size.width).toInt().coerceAtLeast(1)
                     drawImage(
                         image = image,
-                        srcOffset = IntOffset(sourceStart, 0),
-                        srcSize = IntSize(sourceEnd - sourceStart, image.height),
+                        srcOffset = IntOffset(overlapStart - tileStart, 0),
+                        srcSize = IntSize(overlapEnd - overlapStart, image.height),
                         dstOffset = IntOffset(destinationStart, 0),
                         dstSize = IntSize(destinationWidth, size.height.toInt().coerceAtLeast(1)),
                         filterQuality = FilterQuality.Low
@@ -624,6 +639,13 @@ private fun PlayerWaveforms(
             }
             drawLine(Color.White, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), 3f)
             drawLine(Color(0xFF00E5FF), Offset(size.width / 2f - 2f, 0f), Offset(size.width / 2f - 2f, size.height), 1f)
+        }
+            if (detailLoading || detailTiles.isEmpty()) {
+                Column(Modifier.align(androidx.compose.ui.Alignment.Center), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 3.dp)
+                    Text("Audio analysieren …", modifier = Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
         Text("Oben Marker ziehen · unten wie ein Jog nach links oder rechts wischen", style = MaterialTheme.typography.labelSmall, color = Color(0xFF78909C), modifier = Modifier.padding(top = 4.dp))
     }
@@ -648,8 +670,8 @@ private fun renderWaveform(waveform: OverviewWaveform): ImageBitmap {
         val mid = normalized(point.mid, waveform.maxMid)
         val high = normalized(point.high, waveform.maxHigh)
         outer[index] = maxOf(low, mid, high) * extent
-        middle[index] = maxOf(low * 0.78f, mid * 0.9f) * extent
-        core[index] = maxOf(low * 0.38f, high * 0.32f) * extent
+        middle[index] = maxOf(low * 0.55f, mid * 0.85f) * extent
+        core[index] = low * 0.28f * extent
     }
 
     fun area(amplitudes: FloatArray): AndroidPath = AndroidPath().apply {
