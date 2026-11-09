@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
+	"database/sql"
 	"encoding/binary"
 	"io"
 	"math"
@@ -62,4 +64,16 @@ func TestReplaceBeatgridMovesAnchorAndChangesTempo(t *testing.T) {
 	second := math.Float64frombits(binary.LittleEndian.Uint64(decoded[position:position+8]))
 	if first != 44100 { t.Fatalf("first marker = %f", first) }
 	if second != 132300 { t.Fatalf("second marker = %f", second) }
+}
+
+func TestQueryObjectsPreservesNamesNullsAndValues(t *testing.T) {
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	if _, err = db.Exec(`CREATE TABLE sample(id INTEGER PRIMARY KEY,title TEXT,parent INTEGER); INSERT INTO sample(id,title,parent) VALUES(4,'Techno',NULL)`); err != nil { t.Fatal(err) }
+	rows, err := queryObjects(context.Background(), db, `SELECT id,title,parent FROM sample`)
+	if err != nil { t.Fatal(err) }
+	if len(rows) != 1 || rows[0]["id"] != int64(4) || rows[0]["title"] != "Techno" || rows[0]["parent"] != nil {
+		t.Fatalf("unexpected rows: %#v", rows)
+	}
 }

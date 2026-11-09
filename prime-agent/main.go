@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/binary"
@@ -30,7 +31,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 6
+	agentVersion  = 7
 )
 
 type drive struct {
@@ -92,6 +93,7 @@ func main() {
 	s := &server{drives: allowedDrives, tokenFile: tokenPath, semaphore: make(chan struct{}, 2), backups: make(map[string]string)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/companion/v1/health", s.authorize(s.health))
+	mux.HandleFunc("/api/companion/v1/playlists/schema", s.authorize(s.playlistSchema))
 	mux.HandleFunc("/api/companion/v1/tracks/", s.authorize(s.track))
 	httpServer := &http.Server{
 		Addr:              listenAddress,
@@ -133,7 +135,71 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistSchemaInspect": true})
+}
+
+func (s *server) playlistSchema(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	d, ok := s.drives[r.URL.Query().Get("drive")]
+	if !ok {
+		http.Error(w, "unknown drive", http.StatusBadRequest)
+		return
+	}
+	db, version, err := openLibrary(r, d.db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer db.Close()
+	queries := map[string]string{
+		"tables": `SELECT name,sql FROM sqlite_master WHERE type='table' AND name IN ('Playlist','PlaylistEntity') ORDER BY name`,
+		"playlistColumns": `PRAGMA table_info('Playlist')`,
+		"playlistForeignKeys": `PRAGMA foreign_key_list('Playlist')`,
+		"playlistIndexes": `PRAGMA index_list('Playlist')`,
+		"entityColumns": `PRAGMA table_info('PlaylistEntity')`,
+		"entityForeignKeys": `PRAGMA foreign_key_list('PlaylistEntity')`,
+		"entityIndexes": `PRAGMA index_list('PlaylistEntity')`,
+		"idRanges": `SELECT (SELECT max(id) FROM Playlist) AS maxPlaylistId,(SELECT max(id) FROM PlaylistEntity) AS maxEntityId`,
+		"playlistSamples": `SELECT id,title,parentListId,nextListId FROM Playlist ORDER BY id LIMIT 5`,
+		"entitySamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId LIMIT 10`,
+	}
+	result := map[string]any{"schemaVersion": version}
+	for name, query := range queries {
+		rows, queryErr := queryObjects(r.Context(), db, query)
+		if queryErr != nil {
+			http.Error(w, "playlist schema query failed: "+name, http.StatusInternalServerError)
+			return
+		}
+		result[name] = rows
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, result)
+}
+
+func queryObjects(ctx context.Context, db *sql.DB, query string, args ...any) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil { return nil, err }
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil { return nil, err }
+	result := make([]map[string]any, 0)
+	for rows.Next() {
+		values := make([]any, len(columns))
+		destinations := make([]any, len(columns))
+		for index := range values { destinations[index] = &values[index] }
+		if err := rows.Scan(destinations...); err != nil { return nil, err }
+		item := make(map[string]any, len(columns))
+		for index, name := range columns {
+			value := values[index]
+			if bytesValue, ok := value.([]byte); ok { value = string(bytesValue) }
+			item[name] = value
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (s *server) track(w http.ResponseWriter, r *http.Request) {
