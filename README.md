@@ -8,6 +8,8 @@ Version 0.18.2 zeigt bei der Trackauswahl die vollständige Library in einer zuv
 
 Version 0.18.3 verwendet für Playlist-Änderungen Engines vorhandene native Trigger, lokale Track-IDs, die aktuelle Library-UUID und den Import-Read-Counter. Dadurch übernimmt das laufende Engine-Modell die Änderung über denselben Datenpfad wie EngineX; ein Service- oder Geräteneustart gehört nicht mehr zum Ablauf.
 
+Version 0.18.4 ersetzt die globale Fremdschlüsselprüfung durch eine gezielte Validierung der geänderten Playlist, ihrer Mitgliedschaften und ihrer Verkettung. Bereits vorhandene, unabhängige Datenbankabweichungen blockieren damit keinen Playlist-Commit mehr.
+
 **Der praktisch bestätigte Gesamtstand einschließlich Versionen, Schreibsicherheit und rebootfester Agent-Installation steht in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).** Ältere Abschnitte dieses Dokuments beschreiben teilweise frühere Entwicklungsphasen.
 
 ## USB-Import

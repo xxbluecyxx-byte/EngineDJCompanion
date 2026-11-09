@@ -6,8 +6,8 @@ android {
         applicationId = "de.enginecompanion"
         minSdk = 28
         targetSdk = 36
-        versionCode = 36
-        versionName = "0.18.3-live-playlists"
+        versionCode = 37
+        versionName = "0.18.4-live-playlist-validation"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {

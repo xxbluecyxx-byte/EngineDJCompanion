@@ -31,7 +31,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 12
+	agentVersion  = 13
 )
 
 type drive struct {
@@ -185,13 +185,26 @@ func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
 	if _, err = tx.ExecContext(r.Context(), `UPDATE Information SET lastRekordBoxLibraryImportReadCounter=COALESCE(lastRekordBoxLibraryImportReadCounter,0)+1`); err != nil {
 		_ = tx.Rollback(); http.Error(w, "library change notification failed", http.StatusConflict); return
 	}
-	var fkProblem int
-	if err = tx.QueryRowContext(r.Context(), `SELECT count(*) FROM pragma_foreign_key_check`).Scan(&fkProblem); err != nil || fkProblem != 0 {
-		_ = tx.Rollback(); http.Error(w, "playlist validation failed", http.StatusConflict); return
+	if err = validatePlaylistMutation(r.Context(), tx, playlistID, input.Action); err != nil {
+		_ = tx.Rollback(); http.Error(w, "playlist validation failed: "+err.Error(), http.StatusConflict); return
 	}
 	if err = tx.Commit(); err != nil { http.Error(w, "playlist commit failed", http.StatusInternalServerError); return }
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, map[string]any{"action": input.Action, "playlistId": playlistID, "backup": backup})
+}
+
+func validatePlaylistMutation(ctx context.Context, tx *sql.Tx, playlistID int64, action string) error {
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM Playlist WHERE id=?`, playlistID).Scan(&exists); err != nil { return err }
+	if action == "delete" {
+		if exists != 0 { return errors.New("deleted playlist still exists") }
+		return nil
+	}
+	if exists != 1 { return errors.New("changed playlist missing") }
+	var badNext int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM PlaylistEntity e LEFT JOIN PlaylistEntity n ON n.id=e.nextEntityId AND n.listId=e.listId WHERE e.listId=? AND coalesce(e.nextEntityId,0)<>0 AND n.id IS NULL`, playlistID).Scan(&badNext); err != nil { return err }
+	if badNext != 0 { return fmt.Errorf("%d broken membership links", badNext) }
+	return nil
 }
 
 func requireNativePlaylistTriggers(ctx context.Context, tx *sql.Tx) error {
