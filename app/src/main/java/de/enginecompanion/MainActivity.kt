@@ -334,9 +334,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                             Text("Performance-Daten vom Prime laden …", modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         state.detailMedia?.let { media ->
-                            WlanPlayer(media, state.detailTrack, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy) {
-                                vm.syncEngineX(state.remoteLibrary?.drive ?: "Engine")
-                            }
+                            WlanPlayer(media, state.detailTrack, state.detailAnalysis, state.detailWaveform, state.detailWaveformBusy, vm::refreshRemoteTracks)
                             HorizontalDivider(Modifier.padding(vertical = 20.dp))
                         }
                         state.detailAnalysis?.let { analysis ->
@@ -355,7 +353,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean, onLibraryChanged: () -> Unit) {
+private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackAnalysis?, detailedWaveform: OverviewWaveform?, waveformBusy: Boolean, onTracksChanged: (Collection<Long>) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val player = remember(media.url, media.authorization) {
@@ -593,7 +591,7 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
                 cueWriteBusy = true; cueWriteStatus = "Cues werden gesichert und übertragen …"
                 scope.launch {
                     runCatching { withContext(Dispatchers.IO) { EngineXClient().updateCues(media, playerCues) } }
-                        .onSuccess { backup -> primeCues = playerCues; cueWriteStatus = "Cues auf Prime gespeichert · Sicherung: ${backup?.substringAfterLast('/') ?: "vorhanden"}"; onLibraryChanged() }
+                        .onSuccess { backup -> primeCues = playerCues; cueWriteStatus = "Cues auf Prime gespeichert · Sicherung: ${backup?.substringAfterLast('/') ?: "vorhanden"}" }
                         .onFailure { cueWriteStatus = "Cue-Übertragung fehlgeschlagen: ${it.message}" }
                     cueWriteBusy = false
                 }
@@ -615,18 +613,21 @@ private fun WlanPlayer(media: EngineXTrackMedia, track: Track?, analysis: TrackA
                     scope.launch {
                         var remaining = pendingTagWrites
                         var lastBackup: String? = null
+                        val changedTrackIds = linkedSetOf<Long>()
                         for ((index, queued) in pendingTagWrites.withIndex()) {
                             tagWriteStatus = "${index + 1} von ${pendingTagWrites.size}: ${queued.title}"
                             val queuedMedia = media.copy(url = media.url.replace(Regex("/tracks/\\d+/audio"), "/tracks/${queued.trackId}/audio"))
                             val result = runCatching { withContext(Dispatchers.IO) { EngineXClient().updateMetadata(queuedMedia, queued.after) } }
                             if (result.isFailure) { tagWriteStatus = "Schreiben fehlgeschlagen bei ${queued.title}: ${result.exceptionOrNull()?.message}"; break }
                             val saved = result.getOrThrow(); lastBackup = saved.backup ?: lastBackup
+                            changedTrackIds += queued.trackId
                             if (queued.trackId == track?.id) primeMetadata = saved
                             clearTagDraft(tagPreferences, queued.draftKey)
                             remaining = remaining.filterNot { it.trackId == queued.trackId }
                             pendingTagWrites = remaining
                         }
-                        if (remaining.isEmpty()) { tagWriteStatus = "Alle Änderungen gespeichert · Sicherung: ${lastBackup?.substringAfterLast('/') ?: "erstellt"}"; onLibraryChanged() }
+                        if (changedTrackIds.isNotEmpty()) onTracksChanged(changedTrackIds)
+                        if (remaining.isEmpty()) tagWriteStatus = "Alle Änderungen gespeichert · Sicherung: ${lastBackup?.substringAfterLast('/') ?: "erstellt"}"
                         tagWriteBusy = false
                     }
                 }

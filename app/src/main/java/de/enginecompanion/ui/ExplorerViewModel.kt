@@ -14,6 +14,7 @@ import de.enginecompanion.network.EngineXSecretStore
 import de.enginecompanion.network.EngineXSnapshot
 import de.enginecompanion.network.EngineXSnapshotCache
 import de.enginecompanion.network.EngineXTrackMedia
+import de.enginecompanion.network.TrackMetadata
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -189,13 +190,49 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     fun sort(value: String) { mutable.update { it.copy(sort = value, limit = 200) }; refresh() }
     fun playlist(id: Long?) { mutable.update { it.copy(playlist = id, sort = if (id == null) "Titel" else "Playlist", limit = 200) }; refresh() }
     fun more() { mutable.update { it.copy(limit = (it.limit + 200).coerceAtMost(100000)) }; refresh() }
+    fun refreshRemoteTracks(trackIds: Collection<Long>) {
+        val ids = trackIds.toSet()
+        if (ids.isEmpty()) return
+        val code = engineXSecrets.accessCode() ?: return
+        val initial = state.value.remoteLibrary ?: return
+        viewModelScope.launch {
+            val results = withContext(Dispatchers.IO) {
+                ids.map { id ->
+                    runCatching {
+                        val media = engineXClient.trackMedia(engineXSecrets.host(), code, id, initial.drive)
+                        engineXClient.metadata(media)
+                    }
+                }
+            }
+            val metadata = results.mapNotNull { it.getOrNull() }
+            if (metadata.isNotEmpty()) {
+                val current = state.value.remoteLibrary ?: return@launch
+                val updated = EngineXClient.applyMetadata(current, metadata)
+                withContext(Dispatchers.IO) { engineXCache.save(updated) }
+                val detailId = state.value.detailTrack?.id
+                val detailTrack = detailId?.let { id -> updated.tracks.find { it.id == id } }
+                mutable.update { existing ->
+                    existing.copy(
+                        remoteLibrary = updated,
+                        tracks = existing.tracks.map { shown -> updated.tracks.find { it.id == shown.id } ?: shown },
+                        detailTrack = detailTrack ?: existing.detailTrack,
+                        detailTitle = detailTrack?.title ?: existing.detailTitle,
+                        details = detailTrack?.let { remoteReport(it, updated) } ?: existing.details,
+                        engineXStatus = "${metadata.size} Track${if (metadata.size == 1) "" else "s"} vom Prime aktualisiert"
+                    )
+                }
+                refresh()
+            }
+            val failed = results.count { it.isFailure }
+            if (failed > 0) mutable.update { it.copy(engineXStatus = "$failed Track${if (failed == 1) "" else "s"} konnten nicht neu gelesen werden") }
+        }
+    }
     fun closeDetails() { mutable.update { it.copy(details = null, detailAnalysis = null, detailTrack = null, detailMedia = null, detailBusy = false, detailWaveform = null, detailWaveformBusy = false) } }
     fun details(track: Track) { viewModelScope.launch {
         try {
             if (state.value.remoteActive) {
                 val remote = state.value.remoteLibrary ?: return@launch
-                val playlistNames = remote.playlistTracks.filterValues { track.id in it }.keys.mapNotNull { id -> remote.playlists.find { it.id == id }?.title }
-                val report = "EngineX WLAN · Live vom Prime\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: ${MetadataDisplay.duration(track.seconds)}\n${MetadataDisplay.bpm(track.bpm)}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}"
+                val report = remoteReport(track, remote)
                 mutable.update { it.copy(details = report, detailAnalysis = null, detailTitle = track.title, detailTrack = track, detailBusy = true, detailWaveform = null, detailWaveformBusy = false) }
                 val code = engineXSecrets.accessCode() ?: throw SecurityException("EngineX-Zugriffscode fehlt.")
                 try {
@@ -253,5 +290,11 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) { fail(e) }
             finally { mutable.update { it.copy(querying = false) } }
         }
+    }
+
+    private fun remoteReport(track: Track, remote: EngineXSnapshot): String {
+        val playlistNames = remote.playlistTracks.filterValues { track.id in it }.keys
+            .mapNotNull { id -> remote.playlists.find { it.id == id }?.title }
+        return "EngineX WLAN · Live vom Prime\n\nTrack-ID: ${track.id}\nTitel: ${track.title}\nInterpret: ${track.artist ?: "—"}\nAlbum: ${track.album ?: "—"}\nDauer: ${MetadataDisplay.duration(track.seconds)}\n${MetadataDisplay.bpm(track.bpm)}\nTonart: ${MetadataDisplay.keyWithName(track.key)} (Rohwert ${track.key ?: "—"})\nBewertung: ${MetadataDisplay.rating(track.rating)}\n\nPlaylists (${playlistNames.size}):\n${playlistNames.ifEmpty { listOf("—") }.joinToString("\n")}"
     }
 }

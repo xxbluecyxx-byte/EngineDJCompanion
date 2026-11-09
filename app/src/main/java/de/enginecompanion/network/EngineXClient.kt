@@ -246,5 +246,21 @@ class EngineXClient {
             return EngineXSnapshot(root.getString("drive"), uuid, root.getString("schemaVersion"), root.getString("generatedAt"), tracks, playlists,
                 byList.mapValues { PlaylistOrder.order(it.value).members.map(Membership::trackId) }, json)
         }
+
+        fun applyMetadata(snapshot: EngineXSnapshot, updates: Collection<TrackMetadata>): EngineXSnapshot {
+            if (updates.isEmpty()) return snapshot
+            val byId = updates.associateBy(TrackMetadata::trackId)
+            val root = org.json.JSONObject(snapshot.rawJson)
+            val tracks = root.getJSONArray("tracks")
+            for (index in 0 until tracks.length()) {
+                val row = tracks.getJSONObject(index)
+                val value = byId[row.getLong("id")] ?: continue
+                row.put("title", value.title)
+                row.put("artist", value.artist)
+                row.put("album", value.album)
+                row.put("rating", value.rating)
+            }
+            return parseSnapshot(root.toString())
+        }
     }
 }
