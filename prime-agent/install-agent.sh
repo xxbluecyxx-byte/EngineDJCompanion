@@ -49,6 +49,9 @@ stage="$TARGET.new.$$"
 unit_stage="$PERSISTENT_UNIT.new.$$"
 boot_before="$INSTALL_DIR/boot-activate.before.$$"
 runtime_before="$INSTALL_DIR/runtime-unit.before.$$"
+boot_clean="$INSTALL_DIR/boot-clean.$$"
+hook_stage="$INSTALL_DIR/boot-hook.$$"
+boot_stage="$BOOT_SCRIPT.new.$$"
 cp "$SOURCE_BINARY" "$stage"
 chmod 755 "$stage"
 cp "$SOURCE_UNIT" "$unit_stage"
@@ -100,7 +103,7 @@ rollback() {
     if [ "$had_binary" = 1 ] && [ "$was_active" = 1 ]; then
         systemctl restart "$SERVICE" >/dev/null 2>&1 || true
     fi
-    rm -f "$stage" "$unit_stage" "$boot_before" "$runtime_before"
+    rm -f "$stage" "$unit_stage" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$boot_stage"
     exit 1
 }
 
@@ -118,13 +121,12 @@ if [ ! -f "$INSTALL_DIR/boot-activate.original" ]; then
     chmod 755 "$INSTALL_DIR/boot-activate.original"
 fi
 
-boot_stage="$BOOT_SCRIPT.new.$$"
 awk -v begin="$MARKER_BEGIN" -v end="$MARKER_END" '
     $0 == begin { skip=1; next }
     $0 == end { skip=0; next }
     !skip { print }
-' "$BOOT_SCRIPT" >"$boot_stage"
-cat >>"$boot_stage" <<'HOOK'
+' "$BOOT_SCRIPT" >"$boot_clean"
+cat >"$hook_stage" <<'HOOK'
 
 # BEGIN ENGINE COMPANION AGENT
 if [ -f "$dest/companion/engine-companion-agent.service" ] && \
@@ -137,6 +139,15 @@ if [ -f "$dest/companion/engine-companion-agent.service" ] && \
 fi
 # END ENGINE COMPANION AGENT
 HOOK
+awk -v hook="$hook_stage" '
+    $0 == "if command -v systemctl >/dev/null 2>&1; then" && !inserted {
+        while ((getline line < hook) > 0) print line
+        close(hook)
+        inserted=1
+    }
+    { print }
+    END { if (!inserted) exit 42 }
+' "$boot_clean" >"$boot_stage" || rollback
 sh -n "$boot_stage" || rollback
 chmod 755 "$boot_stage"
 mv "$boot_stage" "$BOOT_SCRIPT"
@@ -170,7 +181,7 @@ mv "$INSTALL_DIR/health.json.new" "$INSTALL_DIR/health.json"
     echo "boot_hook=$BOOT_SCRIPT"
 } >"$INSTALL_DIR/install-state"
 
-rm -f "$PERSISTENT_UNIT.previous" "$boot_before" "$runtime_before"
+rm -f "$PERSISTENT_UNIT.previous" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage"
 grep -qF "$MARKER_BEGIN" "$BOOT_SCRIPT" || fail "Boot-Hook wurde nicht gespeichert"
 systemctl is-active "$SERVICE" >/dev/null || fail "Agent ist nach Healthcheck nicht aktiv"
 echo "Engine Companion Agent wurde installiert, geprüft und in boot-activate.sh registriert."

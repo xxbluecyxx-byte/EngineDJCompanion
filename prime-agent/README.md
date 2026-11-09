@@ -25,7 +25,7 @@ GitHub Actions führt die Tests auf Linux aus und baut anschließend ohne CGo f�
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o engine-companion-agent .
 ```
 
-Das Workflow-Artefakt `EngineCompanion-Prime-agent-armv7` enthält Binary, SHA-256-Datei, die systemd-Unit sowie Installations- und Deinstallationsskript. Der Installer prüft den Hash, ersetzt das Binary atomar und registriert den Dienst im persistenten `/data/sc5000-custom/bundle/boot-activate.sh`. Dieser kopiert die Unit bei jedem Start in das flüchtige `/run/systemd/system`, weil das Root-Dateisystem des Prime schreibgeschützt ist. Anschließend prüft der Installer den authentifizierten Health-Endpunkt. Scheitert ein Schritt, werden Boot-Skript, Runtime-Unit und Binary automatisch wiederhergestellt.
+Das Workflow-Artefakt `EngineCompanion-Prime-agent-armv7` enthält Binary, SHA-256-Datei, die systemd-Unit sowie Installations- und Deinstallationsskript. Der Installer prüft den Hash, ersetzt das Binary atomar und registriert den Dienst im persistenten `/data/sc5000-custom/bundle/boot-activate.sh`. Der markierte Companion-Block steht vor dem abschließenden Neustart von `engine.service`, kopiert die Unit bei jedem Start in das flüchtige `/run/systemd/system` und startet den Agenten. Das Root-Dateisystem des Prime bleibt dabei unangetastet. Anschließend prüft der Installer den authentifizierten Health-Endpunkt. Scheitert ein Schritt, werden Boot-Skript, Runtime-Unit und Binary automatisch wiederhergestellt.
 
 Alle fünf Dateien aus dem Artefakt zusammen nach `/tmp/engine-companion-agent-install/` auf den Prime kopieren und dort ausführen:
 
