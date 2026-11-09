@@ -2,6 +2,8 @@
 
 Native, unabhängige Android-App in Kotlin / Jetpack Compose Material 3 mit Engine-Library, WLAN-Player und abgesicherten Metadaten-, Hot-Cue- und Beatgrid-Werkzeugen. Der separate ARMv7-Agent läuft direkt auf dem Prime 4+. Keine offizielle Denon-/Engine-Anwendung.
 
+Version 0.18 ergänzt einen Playlist-Editor für die Live-Library. Playlists lassen sich erstellen, umbenennen und sicher löschen; Tracks können hinzugefügt, entfernt und neu sortiert werden. Agent v9 sichert und prüft die Engine-Datenbank vor jeder Schreibtransaktion.
+
 **Der praktisch bestätigte Gesamtstand einschließlich Versionen, Schreibsicherheit und rebootfester Agent-Installation steht in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).** Ältere Abschnitte dieses Dokuments beschreiben teilweise frühere Entwicklungsphasen.
 
 ## USB-Import

@@ -108,6 +108,11 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
     var exportText by remember { mutableStateOf("") }
     var showEngineX by remember { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var playlistDialog by remember { mutableStateOf<String?>(null) }
+    var editedPlaylistId by remember { mutableStateOf<Long?>(null) }
+    var playlistTitle by remember { mutableStateOf("") }
+    var playlistParent by remember { mutableStateOf(0L) }
+    var trackEditorId by remember { mutableStateOf<Long?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(vm) { onUsbRefreshAvailable(vm::refreshUsb) }
@@ -237,6 +242,10 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                     }
                 }
                 1 -> Column(Modifier.weight(1f)) {
+                    if (state.remoteActive) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { playlistDialog = "create"; playlistTitle = ""; playlistParent = 0L }, enabled = !state.engineXBusy) { Text("Neue Playlist") }
+                        OutlinedButton(onClick = { playlistDialog = "create"; playlistTitle = ""; playlistParent = shownPlaylists.firstOrNull()?.id ?: 0L }, enabled = !state.engineXBusy && shownPlaylists.isNotEmpty()) { Text("Neuer Unterordner") }
+                    }
                     OutlinedTextField(
                         value = playlistSearch,
                         onValueChange = { playlistSearch = it },
@@ -281,9 +290,10 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                                         }
                                         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    if (isFolder && (directCount ?: 0) > 0) {
-                                        TextButton(onClick = { vm.playlist(playlist.id); tab = 0 }) { Text("Öffnen") }
-                                    }
+                                    if (state.remoteActive) Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                                        TextButton(onClick = { trackEditorId = playlist.id }) { Text("Tracks") }
+                                        TextButton(onClick = { editedPlaylistId = playlist.id; playlistTitle = playlist.title; playlistParent = playlist.parent ?: 0L; playlistDialog = "rename" }) { Text("Umbenennen") }
+                                    } else if (isFolder && (directCount ?: 0) > 0) TextButton(onClick = { vm.playlist(playlist.id); tab = 0 }) { Text("Öffnen") }
                                 }
                             }
                         }
@@ -299,6 +309,38 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                 }
             }
         }
+    }
+    if (playlistDialog == "create" || playlistDialog == "rename") {
+        val rename = playlistDialog == "rename"
+        AlertDialog(onDismissRequest = { playlistDialog = null }, title = { Text(if (rename) "Playlist umbenennen" else "Playlist erstellen") },
+            text = { Column {
+                OutlinedTextField(playlistTitle, { playlistTitle = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                if (!rename) {
+                    Text("Ablage", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        FilterChip(selected = playlistParent == 0L, onClick = { playlistParent = 0L }, label = { Text("Hauptebene") })
+                        shownPlaylists.forEach { parent -> Spacer(Modifier.width(6.dp)); FilterChip(selected = playlistParent == parent.id, onClick = { playlistParent = parent.id }, label = { Text(parent.title) }) }
+                    }
+                }
+            } },
+            confirmButton = { TextButton(onClick = {
+                vm.mutatePlaylist(if (rename) "rename" else "create", editedPlaylistId ?: 0L, playlistTitle, playlistParent) { ok -> if (ok) playlistDialog = null }
+            }, enabled = playlistTitle.isNotBlank() && !state.engineXBusy) { Text("Speichern") } },
+            dismissButton = { Row { if (rename) TextButton(onClick = { playlistDialog = "delete" }) { Text("Löschen", color = MaterialTheme.colorScheme.error) }; TextButton(onClick = { playlistDialog = null }) { Text("Abbrechen") } } })
+    }
+    if (playlistDialog == "delete") {
+        val selected = editedPlaylistId?.let { id -> shownPlaylists.find { it.id == id } }
+        AlertDialog(onDismissRequest = { playlistDialog = null }, title = { Text("Playlist löschen?") },
+            text = { Text("${selected?.title.orEmpty()} wird aus der Library entfernt. Audiodateien bleiben erhalten. Ordner mit Unterordnern werden abgelehnt.") },
+            confirmButton = { TextButton(onClick = { selected?.let { vm.mutatePlaylist("delete", it.id) { ok -> if (ok) playlistDialog = null } } }, enabled = !state.engineXBusy) { Text("Löschen", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { playlistDialog = null }) { Text("Abbrechen") } })
+    }
+    trackEditorId?.let { id ->
+        val playlist = shownPlaylists.find { it.id == id }
+        val allTracks = state.remoteLibrary?.tracks.orEmpty()
+        val initialIds = directPlaylistTracks[id].orEmpty()
+        PlaylistTrackEditor(playlist?.title.orEmpty(), allTracks, initialIds, state.engineXBusy,
+            onDismiss = { trackEditorId = null }, onSave = { ids -> vm.mutatePlaylist("replaceTracks", id, trackIds = ids) { ok -> if (ok) trackEditorId = null } })
     }
     if (showEngineX) {
         var host by rememberSaveable { mutableStateOf(state.engineXHost.ifBlank { "192.168.178.67" }) }
@@ -346,6 +388,46 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                         SelectionContainer { Text(details, style = MaterialTheme.typography.bodyMedium) }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistTrackEditor(title: String, tracks: List<Track>, initialIds: List<Long>, busy: Boolean,
+                                onDismiss: () -> Unit, onSave: (List<Long>) -> Unit) {
+    val selected = remember(initialIds) { initialIds.toMutableStateList() }
+    var query by rememberSaveable { mutableStateOf("") }
+    val byId = remember(tracks) { tracks.associateBy(Track::id) }
+    val candidates = remember(tracks, selected.toList(), query) {
+        val chosen = selected.toSet(); val q = query.trim().lowercase()
+        tracks.asSequence().filter { it.id !in chosen && (q.isBlank() || it.title.lowercase().contains(q) || it.artist.orEmpty().lowercase().contains(q)) }.take(80).toList()
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(18.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TextButton(onClick = onDismiss) { Text("Schließen") }
+                }
+                Text("${selected.size} Tracks · Reihenfolge mit Pfeilen ändern", style = MaterialTheme.typography.bodySmall)
+                LazyColumn(Modifier.weight(1f).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(selected.toList(), key = { it }) { id ->
+                        val track = byId[id]
+                        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)).padding(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text(track?.title ?: "Track $id", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val index = selected.indexOf(id)
+                            TextButton(onClick = { if (index > 0) { selected.removeAt(index); selected.add(index - 1, id) } }, enabled = index > 0) { Text("↑") }
+                            TextButton(onClick = { if (index in 0 until selected.lastIndex) { selected.removeAt(index); selected.add(index + 1, id) } }, enabled = index in 0 until selected.lastIndex) { Text("↓") }
+                            TextButton(onClick = { selected.remove(id) }) { Text("×") }
+                        }
+                    }
+                }
+                OutlinedTextField(query, { query = it }, label = { Text("Tracks hinzufügen") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                LazyColumn(Modifier.heightIn(max = 190.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    items(candidates, key = { it.id }) { track -> TextButton(onClick = { selected.add(track.id) }, modifier = Modifier.fillMaxWidth()) { Text("＋ ${track.title}", Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) } }
+                }
+                Button(onClick = { onSave(selected.toList()) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("${selected.size} Tracks auf Prime speichern") }
             }
         }
     }

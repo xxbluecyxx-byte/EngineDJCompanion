@@ -31,7 +31,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 8
+	agentVersion  = 9
 )
 
 type drive struct {
@@ -85,6 +85,13 @@ type cueInput struct {
 
 type cuesRequest struct { Cues []cueInput `json:"cues"` }
 type beatgridRequest struct { BPM float64 `json:"bpm"`; OffsetMS int64 `json:"offsetMs"` }
+type playlistRequest struct {
+	Action string `json:"action"`
+	PlaylistID int64 `json:"playlistId"`
+	Title string `json:"title"`
+	ParentID int64 `json:"parentId"`
+	TrackIDs []int64 `json:"trackIds"`
+}
 
 var safeDriveName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var safeCueColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
@@ -94,6 +101,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/companion/v1/health", s.authorize(s.health))
 	mux.HandleFunc("/api/companion/v1/playlists/schema", s.authorize(s.playlistSchema))
+	mux.HandleFunc("/api/companion/v1/playlists", s.authorize(s.playlists))
 	mux.HandleFunc("/api/companion/v1/tracks/", s.authorize(s.track))
 	httpServer := &http.Server{
 		Addr:              listenAddress,
@@ -135,8 +143,93 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistSchemaInspect": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true})
 }
+
+func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	driveName := r.URL.Query().Get("drive")
+	d, ok := s.drives[driveName]
+	if !ok { http.Error(w, "unknown drive", http.StatusBadRequest); return }
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+	var input playlistRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil { http.Error(w, "invalid playlist request", http.StatusBadRequest); return }
+	input.Title = strings.TrimSpace(input.Title)
+	if len([]byte(input.Title)) > 512 || input.ParentID < 0 || input.PlaylistID < 0 || len(input.TrackIDs) > 100000 {
+		http.Error(w, "invalid playlist request", http.StatusBadRequest); return
+	}
+	switch input.Action {
+	case "create": if input.Title == "" || input.PlaylistID != 0 { http.Error(w, "invalid create request", http.StatusBadRequest); return }
+	case "rename": if input.Title == "" || input.PlaylistID <= 0 { http.Error(w, "invalid rename request", http.StatusBadRequest); return }
+	case "delete": if input.PlaylistID <= 0 { http.Error(w, "invalid delete request", http.StatusBadRequest); return }
+	case "replaceTracks":
+		if input.PlaylistID <= 0 { http.Error(w, "invalid track request", http.StatusBadRequest); return }
+		seen := make(map[int64]bool, len(input.TrackIDs)); for _, id := range input.TrackIDs { if id <= 0 || seen[id] { http.Error(w, "invalid or duplicate track id", http.StatusBadRequest); return }; seen[id] = true }
+	default: http.Error(w, "unknown playlist action", http.StatusBadRequest); return
+	}
+	backup, err := s.backupLibrary(r, d.db, driveName)
+	if err != nil { http.Error(w, "backup failed: "+err.Error(), http.StatusServiceUnavailable); return }
+	dsn := (&url.URL{Scheme: "file", Path: d.db, RawQuery: "mode=rw&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil { http.Error(w, "library write open failed", http.StatusServiceUnavailable); return }
+	defer db.Close(); db.SetMaxOpenConns(1)
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil { http.Error(w, "library busy", http.StatusConflict); return }
+	playlistID := input.PlaylistID
+	if err = mutatePlaylist(r.Context(), tx, &playlistID, input); err != nil {
+		_ = tx.Rollback(); status := http.StatusConflict
+		if errors.Is(err, sql.ErrNoRows) { status = http.StatusNotFound }
+		http.Error(w, err.Error(), status); return
+	}
+	var fkProblem int
+	if err = tx.QueryRowContext(r.Context(), `SELECT count(*) FROM pragma_foreign_key_check`).Scan(&fkProblem); err != nil || fkProblem != 0 {
+		_ = tx.Rollback(); http.Error(w, "playlist validation failed", http.StatusConflict); return
+	}
+	if err = tx.Commit(); err != nil { http.Error(w, "playlist commit failed", http.StatusInternalServerError); return }
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"action": input.Action, "playlistId": playlistID, "backup": backup})
+}
+
+func mutatePlaylist(ctx context.Context, tx *sql.Tx, playlistID *int64, input playlistRequest) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	switch input.Action {
+	case "create":
+		if input.ParentID != 0 { var exists int; if err := tx.QueryRowContext(ctx, `SELECT 1 FROM Playlist WHERE id=?`, input.ParentID).Scan(&exists); err != nil { return fmt.Errorf("parent playlist not found: %w", err) } }
+		var tail int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM Playlist WHERE parentListId=? AND nextListId=0`, input.ParentID).Scan(&tail)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) { return errors.New("playlist chain is ambiguous") }
+		result, err := tx.ExecContext(ctx, `INSERT INTO Playlist(title,parentListId,isPersisted,nextListId,lastEditTime,isExplicitlyExported) VALUES(?,?,1,NULL,?,1)`, input.Title, input.ParentID, now)
+		if err != nil { return fmt.Errorf("playlist already exists: %w", err) }
+		id, err := result.LastInsertId(); if err != nil { return err }; *playlistID = id
+		if tail != 0 { if _, err = tx.ExecContext(ctx, `UPDATE Playlist SET nextListId=?,lastEditTime=? WHERE id=?`, id, now, tail); err != nil { return err } }
+		_, err = tx.ExecContext(ctx, `UPDATE Playlist SET nextListId=0 WHERE id=?`, id); return err
+	case "rename":
+		result, err := tx.ExecContext(ctx, `UPDATE Playlist SET title=?,lastEditTime=? WHERE id=?`, input.Title, now, input.PlaylistID)
+		if err != nil { return fmt.Errorf("playlist title already exists: %w", err) }; return requireOne(result)
+	case "delete":
+		var parent, next int64
+		if err := tx.QueryRowContext(ctx, `SELECT parentListId,nextListId FROM Playlist WHERE id=?`, input.PlaylistID).Scan(&parent, &next); err != nil { return err }
+		var children int; if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM Playlist WHERE parentListId=?`, input.PlaylistID).Scan(&children); err != nil { return err }
+		if children != 0 { return errors.New("playlist contains child playlists") }
+		var previous int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM Playlist WHERE parentListId=? AND nextListId=?`, parent, input.PlaylistID).Scan(&previous)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) { return errors.New("playlist chain is ambiguous") }
+		result, err := tx.ExecContext(ctx, `DELETE FROM Playlist WHERE id=?`, input.PlaylistID); if err != nil { return err }; if err = requireOne(result); err != nil { return err }
+		if previous != 0 { _, err = tx.ExecContext(ctx, `UPDATE Playlist SET nextListId=?,lastEditTime=? WHERE id=?`, next, now, previous) }; return err
+	case "replaceTracks":
+		var exists int; if err := tx.QueryRowContext(ctx, `SELECT 1 FROM Playlist WHERE id=?`, input.PlaylistID).Scan(&exists); err != nil { return err }
+		type identity struct { uuid string; id int64 }; identities := make([]identity, 0, len(input.TrackIDs))
+		for _, localID := range input.TrackIDs { var v identity; if err := tx.QueryRowContext(ctx, `SELECT coalesce(originDatabaseUuid,''),coalesce(originTrackId,0) FROM Track WHERE id=?`, localID).Scan(&v.uuid, &v.id); err != nil { return fmt.Errorf("track %d not found: %w", localID, err) }; if v.uuid == "" || v.id <= 0 { return fmt.Errorf("track %d has no origin identity", localID) }; identities = append(identities, v) }
+		if _, err := tx.ExecContext(ctx, `DELETE FROM PlaylistEntity WHERE listId=?`, input.PlaylistID); err != nil { return err }
+		entityIDs := make([]int64, 0, len(identities))
+		for _, v := range identities { result, err := tx.ExecContext(ctx, `INSERT INTO PlaylistEntity(listId,trackId,databaseUuid,nextEntityId,membershipReference) VALUES(?,?,?,NULL,0)`, input.PlaylistID, v.id, v.uuid); if err != nil { return err }; id, err := result.LastInsertId(); if err != nil { return err }; entityIDs = append(entityIDs, id) }
+		for index, id := range entityIDs { next := int64(0); if index+1 < len(entityIDs) { next = entityIDs[index+1] }; if _, err := tx.ExecContext(ctx, `UPDATE PlaylistEntity SET nextEntityId=? WHERE id=?`, next, id); err != nil { return err } }
+		_, err := tx.ExecContext(ctx, `UPDATE Playlist SET lastEditTime=? WHERE id=?`, now, input.PlaylistID); return err
+	}
+	return errors.New("unsupported action")
+}
+
+func requireOne(result sql.Result) error { changed, err := result.RowsAffected(); if err != nil { return err }; if changed != 1 { return sql.ErrNoRows }; return nil }
 
 func (s *server) playlistSchema(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {

@@ -132,6 +132,29 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun mutatePlaylist(action: String, playlistId: Long = 0, title: String = "", parentId: Long = 0,
+                       trackIds: List<Long> = emptyList(), onComplete: (Boolean) -> Unit = {}) {
+        val code = engineXSecrets.accessCode() ?: run { mutable.update { it.copy(error = "EngineX-Zugriffscode fehlt.") }; onComplete(false); return }
+        val snapshot = state.value.remoteLibrary ?: run { mutable.update { it.copy(error = "Prime-Library zuerst synchronisieren.") }; onComplete(false); return }
+        if (state.value.engineXBusy) { onComplete(false); return }
+        mutable.update { it.copy(engineXBusy = true, engineXStatus = "Playlist wird auf Prime geändert …", error = null) }
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    engineXClient.mutatePlaylist(engineXSecrets.host(), code, snapshot.drive, action, playlistId, title, parentId, trackIds)
+                }
+                val refreshed = withContext(Dispatchers.IO) { engineXClient.snapshot(engineXSecrets.host(), code, snapshot.drive).also(engineXCache::save) }
+                mutable.update { current -> current.copy(remoteLibrary = refreshed, remoteActive = true,
+                    playlist = current.playlist?.takeIf { id -> refreshed.playlists.any { it.id == id } },
+                    engineXStatus = "Playlist übernommen · Sicherung ${result.backup?.substringAfterLast('/') ?: "erstellt"}") }
+                refresh(); onComplete(true)
+            } catch (e: Exception) {
+                mutable.update { it.copy(error = e.message ?: "Playlist konnte nicht geändert werden.", engineXStatus = "Playlist-Änderung fehlgeschlagen") }
+                onComplete(false)
+            } finally { mutable.update { it.copy(engineXBusy = false) } }
+        }
+    }
+
     fun useLocalLibrary() { mutable.update { it.copy(remoteActive = false, playlist = null, limit = 200) }; refresh() }
     fun useRemoteLibrary() {
         if (state.value.remoteLibrary != null) { mutable.update { it.copy(remoteActive = true, playlist = null, limit = 200) }; refresh() }

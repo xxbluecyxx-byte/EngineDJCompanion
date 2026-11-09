@@ -29,6 +29,7 @@ data class TrackMetadata(
     val genre: String, val comment: String, val label: String, val remixer: String,
     val rating: Int, val backup: String? = null
 )
+data class PlaylistMutationResult(val playlistId: Long, val backup: String?)
 data class EngineXSnapshot(
     val drive: String,
     val databaseUuid: String,
@@ -41,6 +42,24 @@ data class EngineXSnapshot(
 )
 
 class EngineXClient {
+    fun mutatePlaylist(host: String, accessCode: String, drive: String, action: String, playlistId: Long = 0,
+                       title: String = "", parentId: Long = 0, trackIds: List<Long> = emptyList()): PlaylistMutationResult {
+        val driveName = java.net.URLEncoder.encode(drive, Charsets.UTF_8.name())
+        val connection = (URL("${agentBaseUrl(host)}/api/companion/v1/playlists?drive=$driveName").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; connectTimeout = 5_000; readTimeout = 120_000; doOutput = true; useCaches = false
+            setRequestProperty("Authorization", "Bearer ${accessCode.trim()}"); setRequestProperty("Accept", "application/json")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        try {
+            val payload = org.json.JSONObject().put("action", action).put("playlistId", playlistId)
+                .put("title", title).put("parentId", parentId).put("trackIds", org.json.JSONArray(trackIds))
+            connection.outputStream.bufferedWriter().use { it.write(payload.toString()) }
+            val code = connection.responseCode
+            if (code !in 200..299) throw IOException(connection.errorStream?.bufferedReader()?.use { it.readText() }?.trim().orEmpty().ifBlank { "Agent antwortet mit HTTP $code." })
+            val result = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            return PlaylistMutationResult(result.getLong("playlistId"), result.optString("backup").takeIf(String::isNotBlank))
+        } finally { connection.disconnect() }
+    }
     fun updateBeatgrid(media: EngineXTrackMedia, bpm: Double, offsetMs: Long): String? {
         val endpoint = media.url.replace(Regex("/audio(?=\\?)"), "/beatgrid")
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {

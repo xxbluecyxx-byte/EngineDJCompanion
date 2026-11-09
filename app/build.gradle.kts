@@ -6,8 +6,8 @@ android {
         applicationId = "de.enginecompanion"
         minSdk = 28
         targetSdk = 36
-        versionCode = 32
-        versionName = "0.17.0-live-track-state"
+        versionCode = 33
+        versionName = "0.18.0-playlist-editor"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
