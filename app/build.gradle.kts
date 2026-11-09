@@ -6,8 +6,8 @@ android {
         applicationId = "de.enginecompanion"
         minSdk = 28
         targetSdk = 36
-        versionCode = 34
-        versionName = "0.18.1-playlist-reload"
+        versionCode = 35
+        versionName = "0.18.2-playlist-editor-fix"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {

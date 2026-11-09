@@ -12,7 +12,6 @@ Kleiner, separat gebauter ARMv7-Dienst für EngineX OS auf dem Prime 4+. Der Die
 - `POST /api/companion/v1/tracks/{id}/beatgrid?drive=Engine`
 - `GET /api/companion/v1/playlists/schema?drive=Engine`
 - `POST /api/companion/v1/playlists?drive=Engine`
-- `POST /api/companion/v1/library/reload`
 
 Alle Routen benötigen `Authorization: Bearer <EngineX-Code>`. Trackpfade werden ausschließlich per numerischer Track-ID aus der bestätigten `m.db` gelesen. Die Metadatenroute darf nur feste Track-Spalten ändern und erstellt vor dem ersten Schreibvorgang jeder Agent-Sitzung mit SQLite `VACUUM INTO` eine konsistente, per `integrity_check` geprüfte Sicherung unter `Database2/CompanionBackups`. Eine Sitzung verwendet dieselbe Ausgangssicherung weiter; aufbewahrt werden höchstens fünf Sicherungen. Alle normalen Lesezugriffe verwenden weiterhin `mode=ro` und `query_only`; andere Schema-Versionen als 3.0.2 werden abgelehnt.
 
@@ -20,7 +19,7 @@ Der Analyse-Endpunkt liefert `beatData`, `quickCues`, `loops` und `overviewWavef
 Die Cue-Route ersetzt ausschließlich die acht Hot-Cue-Slots im vorhandenen `quickCues`-BLOB. Main Cue und unbekannte Formatfelder bleiben erhalten; anschließend wird Engines Performance-Änderungsflag gesetzt.
 Die Beatgrid-Route bewahrt Standardmarker, Beatnummern und unbekannte Felder. Sie schreibt angepasste Marker mit dem gewünschten BPM und Offset und setzt ebenfalls Engines Performance-Änderungsflag.
 Der Playlist-Schema-Endpunkt in Agent v8 ist strikt lesend und bestätigte die realen Tabellen, Pflichtfelder, Indizes, ID-Bereiche, Sequenzen, Statusfelder und Herkunftszuordnungen. Agent v9 nutzt diese Werte für transaktionales Erstellen, Umbenennen, Löschen und vollständiges Neuordnen von Playlists. Dabei werden die nativen Verkettungen und Origin-Track-IDs geschrieben und vor dem Commit die Fremdschlüssel geprüft.
-Agent v10 kann nach ausdrücklicher Bestätigung durch den Benutzer `engine.service` neu starten, damit Engines im Speicher gehaltener Playlist-Baum die Änderungen übernimmt. Dieser Aufruf darf nur bei gestoppten Decks erfolgen.
+Engine hält den Playlist-Baum im Arbeitsspeicher und bietet auf dem Referenzgerät weder `ExecReload`, ein Reload-Signal noch eine zugängliche D-Bus-Methode. Ein Neustart von `engine.service` löst dort einen Geräteneustart aus und wird deshalb vom Agenten nicht angeboten. Playlist-Änderungen werden beim nächsten regulären Neustart sichtbar.
 
 ## Build
 

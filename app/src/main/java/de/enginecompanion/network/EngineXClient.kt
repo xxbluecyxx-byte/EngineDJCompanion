@@ -42,19 +42,6 @@ data class EngineXSnapshot(
 )
 
 class EngineXClient {
-    fun reloadPrimeLibrary(host: String, accessCode: String) {
-        val connection = (URL("${agentBaseUrl(host)}/api/companion/v1/library/reload").openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"; connectTimeout = 5_000; readTimeout = 10_000; doOutput = true; useCaches = false
-            setRequestProperty("Authorization", "Bearer ${accessCode.trim()}"); setRequestProperty("Accept", "application/json")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        }
-        try {
-            connection.outputStream.use { it.write("{}".toByteArray()) }
-            val code = connection.responseCode
-            if (code !in 200..299) throw IOException(connection.errorStream?.bufferedReader()?.use { it.readText() }?.trim().orEmpty().ifBlank { "Agent antwortet mit HTTP $code." })
-        } finally { connection.disconnect() }
-    }
-
     fun mutatePlaylist(host: String, accessCode: String, drive: String, action: String, playlistId: Long = 0,
                        title: String = "", parentId: Long = 0, trackIds: List<Long> = emptyList()): PlaylistMutationResult {
         val driveName = java.net.URLEncoder.encode(drive, Charsets.UTF_8.name())

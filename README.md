@@ -4,7 +4,7 @@ Native, unabhängige Android-App in Kotlin / Jetpack Compose Material 3 mit Engi
 
 Version 0.18 ergänzt einen Playlist-Editor für die Live-Library. Playlists lassen sich erstellen, umbenennen und sicher löschen; Tracks können hinzugefügt, entfernt und neu sortiert werden. Agent v9 sichert und prüft die Engine-Datenbank vor jeder Schreibtransaktion.
 
-Version 0.18.1 zeigt bei der Trackauswahl die vollständige Library und bietet nach Playlist-Änderungen einen bestätigten Neustart der Engine-Oberfläche an. Dadurch erscheint der von Engine im Arbeitsspeicher gehaltene Playlist-Baum ohne Geräteneustart. Laufende Decks müssen vorher gestoppt werden.
+Version 0.18.2 zeigt bei der Trackauswahl die vollständige Library in einer zuverlässigen Tab-Ansicht. Der experimentelle Engine-Service-Reload wurde entfernt, weil er auf dem Prime 4+ einen Geräteneustart auslöst. Playlist-Änderungen werden beim nächsten regulären Neustart sichtbar.
 
 **Der praktisch bestätigte Gesamtstand einschließlich Versionen, Schreibsicherheit und rebootfester Agent-Installation steht in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).** Ältere Abschnitte dieses Dokuments beschreiben teilweise frühere Entwicklungsphasen.
 

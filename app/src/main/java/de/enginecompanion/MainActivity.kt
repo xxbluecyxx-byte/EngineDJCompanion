@@ -113,7 +113,6 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
     var playlistTitle by remember { mutableStateOf("") }
     var playlistParent by remember { mutableStateOf(0L) }
     var trackEditorId by remember { mutableStateOf<Long?>(null) }
-    var showPrimeReload by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(vm) { onUsbRefreshAvailable(vm::refreshUsb) }
@@ -325,7 +324,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
                 }
             } },
             confirmButton = { TextButton(onClick = {
-                vm.mutatePlaylist(if (rename) "rename" else "create", editedPlaylistId ?: 0L, playlistTitle, playlistParent) { ok -> if (ok) { playlistDialog = null; showPrimeReload = true } }
+                vm.mutatePlaylist(if (rename) "rename" else "create", editedPlaylistId ?: 0L, playlistTitle, playlistParent) { ok -> if (ok) playlistDialog = null }
             }, enabled = playlistTitle.isNotBlank() && !state.engineXBusy) { Text("Speichern") } },
             dismissButton = { Row { if (rename) TextButton(onClick = { playlistDialog = "delete" }) { Text("Löschen", color = MaterialTheme.colorScheme.error) }; TextButton(onClick = { playlistDialog = null }) { Text("Abbrechen") } } })
     }
@@ -333,7 +332,7 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
         val selected = editedPlaylistId?.let { id -> shownPlaylists.find { it.id == id } }
         AlertDialog(onDismissRequest = { playlistDialog = null }, title = { Text("Playlist löschen?") },
             text = { Text("${selected?.title.orEmpty()} wird aus der Library entfernt. Audiodateien bleiben erhalten. Ordner mit Unterordnern werden abgelehnt.") },
-            confirmButton = { TextButton(onClick = { selected?.let { vm.mutatePlaylist("delete", it.id) { ok -> if (ok) { playlistDialog = null; showPrimeReload = true } } } }, enabled = !state.engineXBusy) { Text("Löschen", color = MaterialTheme.colorScheme.error) } },
+            confirmButton = { TextButton(onClick = { selected?.let { vm.mutatePlaylist("delete", it.id) { ok -> if (ok) playlistDialog = null } } }, enabled = !state.engineXBusy) { Text("Löschen", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { playlistDialog = null }) { Text("Abbrechen") } })
     }
     trackEditorId?.let { id ->
@@ -341,15 +340,8 @@ private fun Explorer(onUsbRefreshAvailable: (() -> Unit) -> Unit, vm: ExplorerVi
         val allTracks = state.remoteLibrary?.tracks.orEmpty()
         val initialIds = directPlaylistTracks[id].orEmpty()
         PlaylistTrackEditor(playlist?.title.orEmpty(), allTracks, initialIds, state.engineXBusy,
-            onDismiss = { trackEditorId = null }, onSave = { ids -> vm.mutatePlaylist("replaceTracks", id, trackIds = ids) { ok -> if (ok) { trackEditorId = null; showPrimeReload = true } } })
+            onDismiss = { trackEditorId = null }, onSave = { ids -> vm.mutatePlaylist("replaceTracks", id, trackIds = ids) { ok -> if (ok) trackEditorId = null } })
     }
-    if (showPrimeReload) AlertDialog(
-        onDismissRequest = { showPrimeReload = false },
-        title = { Text("Playlist auf Prime anzeigen") },
-        text = { Text("Engine hält Playlists im Arbeitsspeicher. Zum Übernehmen muss nur die Engine-Oberfläche neu gestartet werden. Stoppe vorher alle laufenden Decks; Audio und Bedienung sind während des kurzen Neustarts nicht verfügbar.") },
-        confirmButton = { Button(onClick = { vm.reloadPrimeLibrary { showPrimeReload = false } }, enabled = !state.engineXBusy) { Text("Prime-Library neu laden") } },
-        dismissButton = { TextButton(onClick = { showPrimeReload = false }) { Text("Später") } }
-    )
     if (showEngineX) {
         var host by rememberSaveable { mutableStateOf(state.engineXHost.ifBlank { "192.168.178.67" }) }
         var code by rememberSaveable { mutableStateOf("") }
@@ -420,9 +412,9 @@ private fun PlaylistTrackEditor(title: String, tracks: List<Track>, initialIds: 
                     TextButton(onClick = onDismiss) { Text("Schließen") }
                 }
                 Text("${selected.size} Tracks · Reihenfolge mit Pfeilen ändern", style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !adding, onClick = { adding = false }, label = { Text("In Playlist (${selected.size})") })
-                    FilterChip(selected = adding, onClick = { adding = true }, label = { Text("Tracks hinzufügen") })
+                PrimaryTabRow(selectedTabIndex = if (adding) 1 else 0, modifier = Modifier.padding(top = 8.dp)) {
+                    Tab(selected = !adding, onClick = { adding = false }, text = { Text("In Playlist (${selected.size})") })
+                    Tab(selected = adding, onClick = { adding = true }, text = { Text("Tracks hinzufügen") })
                 }
                 if (!adding) {
                     LazyColumn(Modifier.weight(1f).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
