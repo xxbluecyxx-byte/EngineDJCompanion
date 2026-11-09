@@ -1,6 +1,8 @@
-# Engine DJ Companion — Phase 1
+# Engine DJ Companion
 
-Native, unabhängige Android-App in Kotlin / Jetpack Compose Material 3. Ausschließlich lesender Engine-Library-Explorer. Keine offizielle Denon-/Engine-Anwendung.
+Native, unabhängige Android-App in Kotlin / Jetpack Compose Material 3 mit Engine-Library, WLAN-Player und abgesicherten Metadaten-, Hot-Cue- und Beatgrid-Werkzeugen. Der separate ARMv7-Agent läuft direkt auf dem Prime 4+. Keine offizielle Denon-/Engine-Anwendung.
+
+**Der praktisch bestätigte Gesamtstand einschließlich Versionen, Schreibsicherheit und rebootfester Agent-Installation steht in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).** Ältere Abschnitte dieses Dokuments beschreiben teilweise frühere Entwicklungsphasen.
 
 ## USB-Import
 
@@ -61,7 +63,7 @@ Ab Version 0.5.1 verwendet jeder Debug-Build denselben eingecheckten Debug-Schl�
 
 USB-Import und EngineX-WLAN-Synchronisierung wurden auf dem ASUS ROG Phone 9 Pro mit der internen SSD des Prime 4+ praktisch bestätigt. Echte Tracks, Playlist-Baum, Zuordnungen und native Reihenfolge werden angezeigt; die WLAN-Momentaufnahme mit 7401 Tracks und 48 Playlists bleibt offline verfügbar.
 
-Hot Cues, gespeicherte Loops und Beatgrid-Marker werden bei lokalen Schema-3.x-Momentaufnahmen dekodiert, benötigen aber noch den Vergleich mit echten, am Prime bekannten Markern. Waveforms werden noch nicht dekodiert. Kein Editor, keine Wiedergabe und keine Synchronisierung. Smartlists werden nicht ausgewertet.
+Hot Cues, gespeicherte Loops, Beatgrids und Waveforms sind mit echten Prime-Daten praktisch bestätigt. WLAN-Wiedergabe sowie abgesicherte Schreibzugriffe für Tags, Bewertungen, Hot Cues und Beatgrids sind implementiert. Loop-Bearbeitung, Playlist-Schreibfunktionen, vollständige Konfliktauflösung und Smartlists stehen noch aus.
 
 SAF bietet keine atomare Sperre mehrerer Dateien. Doppelte Hash-Prüfung erkennt beobachtete Änderungen, ersetzt aber keine ruhende Quelle. Nicht während paralleler Schreibzugriffe importieren. Im Prime-Computer-Modus wird kein gleichzeitiger Engine-OS-Zugriff unterstellt.
 
@@ -80,4 +82,4 @@ Maximal 4 GiB Import, mindestens doppelte DB-Größe plus Arbeitsraum intern nö
 
 Siehe docs/COMPATIBILITY.md und docs/VALIDATION.md.
 Der weitere Weg vom Explorer zum WLAN-Player und sicheren Editor steht in `docs/ROADMAP.md`.
-Der separate, nur lesende ARMv7-Dienst für gezielte Analyse- und Audioabrufe liegt unter `prime-agent/` und wird als eigenes GitHub-Actions-Artefakt gebaut.
+Der separate ARMv7-Dienst für gezielte Analyse-, Audio- und abgesicherte Schreibzugriffe liegt unter `prime-agent/` und wird als eigenes GitHub-Actions-Artefakt gebaut.

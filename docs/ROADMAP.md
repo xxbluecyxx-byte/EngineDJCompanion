@@ -1,5 +1,19 @@
 # Entwicklungsplan
 
+## Status am 9. November 2026
+
+| Bereich | Status |
+|---|---|
+| Entwicklungsbasis und aktualisierbare APK | abgeschlossen |
+| WLAN-Library, Analyse und Audio-Range-Streaming | abgeschlossen |
+| Mobile Waveforms, Player, Hot Cues und Beatgrid-Werkzeuge | praktisch bestätigt |
+| Tags, Rating, Hot Cues und Beatgrid auf Prime schreiben | praktisch bestätigt |
+| Persistenter Prime-Agent mit Healthcheck und Rollback | praktisch bestätigt |
+| Loop-Editor und Loop-Synchronisierung | zurückgestellt |
+| Vollständige Konfliktauflösung und Undo/Redo | offen |
+
+Details und Betriebsanleitung: [CURRENT_STATUS.md](CURRENT_STATUS.md).
+
 ## 1. Stabile Entwicklungsbasis
 
 - Fester Debug-Signaturschlüssel für aktualisierbare APKs.

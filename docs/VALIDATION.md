@@ -1,5 +1,17 @@
 # Validierung — 8. November 2026
 
+> Diese Datei enthält die chronologische Validierung früherer Versionen. Der aktuelle, praktisch bestätigte Stand vom 9. November 2026 steht in [CURRENT_STATUS.md](CURRENT_STATUS.md).
+
+## Bestätigung vom 9. November 2026
+
+- Android-App `0.16.2-grid-state` mit WLAN-Player sowie Tag-, Rating-, Hot-Cue- und Beatgrid-Werkzeugen praktisch bestätigt.
+- Prime-Agent API-Version 6 auf `armv7l` aktiv; authentifizierter Healthcheck meldet `metadataWrite: true`.
+- Installiertes Binary: SHA-256 `ed4f3f4fdbbfd4a08081f7c4675b26330f56a9cffa4c1e4cc8b39a4381a733cb`.
+- Das Prime-Root-Dateisystem ist read-only; `/data` ist persistent, `/run` flüchtig.
+- Die Agent-Unit wird beim Boot über den vorhandenen `/data/sc5000-custom/bundle/boot-activate.sh` nach `/run/systemd/system` kopiert.
+- Neustart praktisch bestätigt: Die Unit war zunächst registriert und inaktiv und startete nach Abschluss der asynchronen Boot-Abhängigkeiten selbstständig. Anschließend waren Status und Healthcheck erfolgreich.
+- `disabled` ist für diese dynamisch unter `/run` erzeugte Unit erwartungsgemäß und kein Fehler.
+
 Aktueller Entwicklungsstand: `0.5.1-readonly` (Version Code 13). Hot-Cue-, Loop- und Beatgrid-Positionen aus 0.4.0 wurden auf dem Prime 4+ praktisch bestätigt; 0.5.1 wird nach dem Push durch GitHub CI geprüft.
 
 ```
