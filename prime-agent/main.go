@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -31,7 +32,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 9
+	agentVersion  = 10
 )
 
 type drive struct {
@@ -102,6 +103,7 @@ func main() {
 	mux.HandleFunc("/api/companion/v1/health", s.authorize(s.health))
 	mux.HandleFunc("/api/companion/v1/playlists/schema", s.authorize(s.playlistSchema))
 	mux.HandleFunc("/api/companion/v1/playlists", s.authorize(s.playlists))
+	mux.HandleFunc("/api/companion/v1/library/reload", s.authorize(s.reloadLibrary))
 	mux.HandleFunc("/api/companion/v1/tracks/", s.authorize(s.track))
 	httpServer := &http.Server{
 		Addr:              listenAddress,
@@ -143,7 +145,20 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true, "libraryReload": true})
+}
+
+func (s *server) reloadLibrary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, map[string]any{"accepted": true, "service": "engine.service"})
+	go func() {
+		time.Sleep(750 * time.Millisecond)
+		if output, err := exec.Command("systemctl", "restart", "engine.service").CombinedOutput(); err != nil {
+			log.Printf("engine library reload failed: %v: %s", err, strings.TrimSpace(string(output)))
+		}
+	}()
 }
 
 func (s *server) playlists(w http.ResponseWriter, r *http.Request) {

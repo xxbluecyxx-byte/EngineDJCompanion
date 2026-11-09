@@ -155,6 +155,21 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun reloadPrimeLibrary(onAccepted: () -> Unit = {}) {
+        val code = engineXSecrets.accessCode() ?: run { mutable.update { it.copy(error = "EngineX-Zugriffscode fehlt.") }; return }
+        if (state.value.engineXBusy) return
+        mutable.update { it.copy(engineXBusy = true, error = null, engineXStatus = "Prime-Library wird neu geladen …") }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { engineXClient.reloadPrimeLibrary(engineXSecrets.host(), code) }
+                mutable.update { it.copy(engineXStatus = "Engine-Oberfläche startet neu · bitte kurz warten") }
+                onAccepted()
+            } catch (e: Exception) {
+                mutable.update { it.copy(error = e.message ?: "Prime-Library konnte nicht neu geladen werden.", engineXStatus = "Library-Reload fehlgeschlagen") }
+            } finally { mutable.update { it.copy(engineXBusy = false) } }
+        }
+    }
+
     fun useLocalLibrary() { mutable.update { it.copy(remoteActive = false, playlist = null, limit = 200) }; refresh() }
     fun useRemoteLibrary() {
         if (state.value.remoteLibrary != null) { mutable.update { it.copy(remoteActive = true, playlist = null, limit = 200) }; refresh() }
