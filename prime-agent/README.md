@@ -17,7 +17,7 @@ Alle Routen benötigen `Authorization: Bearer <EngineX-Code>`. Trackpfade werden
 Der Analyse-Endpunkt liefert `beatData`, `quickCues`, `loops` und `overviewWaveformData` als Base64-kodierte JSON-Felder. Audio verwendet Go `ServeContent` und unterstützt dadurch HTTP-Range-Anfragen für Player-Seeking.
 Die Cue-Route ersetzt ausschließlich die acht Hot-Cue-Slots im vorhandenen `quickCues`-BLOB. Main Cue und unbekannte Formatfelder bleiben erhalten; anschließend wird Engines Performance-Änderungsflag gesetzt.
 Die Beatgrid-Route bewahrt Standardmarker, Beatnummern und unbekannte Felder. Sie schreibt angepasste Marker mit dem gewünschten BPM und Offset und setzt ebenfalls Engines Performance-Änderungsflag.
-Der Playlist-Schema-Endpunkt in Agent v7 ist strikt lesend und dient zur Bestätigung der realen Tabellen, Pflichtfelder, Indizes, ID-Bereiche und Herkunftszuordnungen vor der Implementierung des Playlist-Editors.
+Der Playlist-Schema-Endpunkt in Agent v8 ist strikt lesend und dient zur Bestätigung der realen Tabellen, Pflichtfelder, Indizes, ID-Bereiche, Sequenzen, Statusfelder und Herkunftszuordnungen vor der Implementierung des Playlist-Editors.
 
 ## Build
 

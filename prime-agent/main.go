@@ -31,7 +31,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 7
+	agentVersion  = 8
 )
 
 type drive struct {
@@ -163,8 +163,11 @@ func (s *server) playlistSchema(w http.ResponseWriter, r *http.Request) {
 		"entityForeignKeys": `PRAGMA foreign_key_list('PlaylistEntity')`,
 		"entityIndexes": `PRAGMA index_list('PlaylistEntity')`,
 		"idRanges": `SELECT (SELECT max(id) FROM Playlist) AS maxPlaylistId,(SELECT max(id) FROM PlaylistEntity) AS maxEntityId`,
-		"playlistSamples": `SELECT id,title,parentListId,nextListId FROM Playlist ORDER BY id LIMIT 5`,
-		"entitySamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId LIMIT 10`,
+		"sequences": `SELECT name,seq FROM sqlite_sequence WHERE name IN ('Playlist','PlaylistEntity') ORDER BY name`,
+		"playlistSamples": `SELECT id,title,parentListId,isPersisted,nextListId,lastEditTime,isExplicitlyExported FROM Playlist ORDER BY id LIMIT 10`,
+		"playlistTailSamples": `SELECT id,title,parentListId,isPersisted,nextListId,lastEditTime,isExplicitlyExported FROM Playlist ORDER BY id DESC LIMIT 10`,
+		"entitySamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,pe.membershipReference,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId LIMIT 10`,
+		"entityTailSamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,pe.membershipReference,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId ORDER BY pe.id DESC LIMIT 10`,
 	}
 	result := map[string]any{"schemaVersion": version}
 	for name, query := range queries {
