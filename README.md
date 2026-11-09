@@ -6,6 +6,8 @@ Version 0.18 ergänzt einen Playlist-Editor für die Live-Library. Playlists las
 
 Version 0.18.2 zeigt bei der Trackauswahl die vollständige Library in einer zuverlässigen Tab-Ansicht. Der experimentelle Engine-Service-Reload wurde entfernt, weil er auf dem Prime 4+ einen Geräteneustart auslöst. Playlist-Änderungen werden beim nächsten regulären Neustart sichtbar.
 
+Version 0.18.3 verwendet für Playlist-Änderungen Engines vorhandene native Trigger, lokale Track-IDs, die aktuelle Library-UUID und den Import-Read-Counter. Dadurch übernimmt das laufende Engine-Modell die Änderung über denselben Datenpfad wie EngineX; ein Service- oder Geräteneustart gehört nicht mehr zum Ablauf.
+
 **Der praktisch bestätigte Gesamtstand einschließlich Versionen, Schreibsicherheit und rebootfester Agent-Installation steht in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).** Ältere Abschnitte dieses Dokuments beschreiben teilweise frühere Entwicklungsphasen.
 
 ## USB-Import

@@ -31,7 +31,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 11
+	agentVersion  = 12
 )
 
 type drive struct {
@@ -143,7 +143,7 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true, "playlistLiveNotify": true})
 }
 
 func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
@@ -175,11 +175,15 @@ func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
 	defer db.Close(); db.SetMaxOpenConns(1)
 	tx, err := db.BeginTx(r.Context(), nil)
 	if err != nil { http.Error(w, "library busy", http.StatusConflict); return }
+	if err = requireNativePlaylistTriggers(r.Context(), tx); err != nil { _ = tx.Rollback(); http.Error(w, err.Error(), http.StatusConflict); return }
 	playlistID := input.PlaylistID
 	if err = mutatePlaylist(r.Context(), tx, &playlistID, input); err != nil {
 		_ = tx.Rollback(); status := http.StatusConflict
 		if errors.Is(err, sql.ErrNoRows) { status = http.StatusNotFound }
 		http.Error(w, err.Error(), status); return
+	}
+	if _, err = tx.ExecContext(r.Context(), `UPDATE Information SET lastRekordBoxLibraryImportReadCounter=COALESCE(lastRekordBoxLibraryImportReadCounter,0)+1`); err != nil {
+		_ = tx.Rollback(); http.Error(w, "library change notification failed", http.StatusConflict); return
 	}
 	var fkProblem int
 	if err = tx.QueryRowContext(r.Context(), `SELECT count(*) FROM pragma_foreign_key_check`).Scan(&fkProblem); err != nil || fkProblem != 0 {
@@ -190,41 +194,46 @@ func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"action": input.Action, "playlistId": playlistID, "backup": backup})
 }
 
+func requireNativePlaylistTriggers(ctx context.Context, tx *sql.Tx) error {
+	required := []string{"trigger_before_insert_List", "trigger_after_insert_List", "trigger_after_delete_List", "trigger_before_delete_PlaylistEntity"}
+	for _, name := range required {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name=?`, name).Scan(&count); err != nil { return err }
+		if count != 1 { return fmt.Errorf("required Engine playlist trigger missing: %s", name) }
+	}
+	return nil
+}
+
 func mutatePlaylist(ctx context.Context, tx *sql.Tx, playlistID *int64, input playlistRequest) error {
-	now := time.Now().UTC().Format(time.RFC3339)
 	switch input.Action {
 	case "create":
 		if input.ParentID != 0 { var exists int; if err := tx.QueryRowContext(ctx, `SELECT 1 FROM Playlist WHERE id=?`, input.ParentID).Scan(&exists); err != nil { return fmt.Errorf("parent playlist not found: %w", err) } }
-		var tail int64
-		err := tx.QueryRowContext(ctx, `SELECT id FROM Playlist WHERE parentListId=? AND nextListId=0`, input.ParentID).Scan(&tail)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) { return errors.New("playlist chain is ambiguous") }
-		result, err := tx.ExecContext(ctx, `INSERT INTO Playlist(title,parentListId,isPersisted,nextListId,lastEditTime,isExplicitlyExported) VALUES(?,?,1,NULL,?,1)`, input.Title, input.ParentID, now)
+		result, err := tx.ExecContext(ctx, `INSERT INTO Playlist(title,parentListId,isPersisted,nextListId,isExplicitlyExported,lastEditTime) VALUES(?,?,1,0,1,strftime('%s'))`, input.Title, input.ParentID)
 		if err != nil { return fmt.Errorf("playlist already exists: %w", err) }
 		id, err := result.LastInsertId(); if err != nil { return err }; *playlistID = id
-		if tail != 0 { if _, err = tx.ExecContext(ctx, `UPDATE Playlist SET nextListId=?,lastEditTime=? WHERE id=?`, id, now, tail); err != nil { return err } }
-		_, err = tx.ExecContext(ctx, `UPDATE Playlist SET nextListId=0 WHERE id=?`, id); return err
+		return nil
 	case "rename":
-		result, err := tx.ExecContext(ctx, `UPDATE Playlist SET title=?,lastEditTime=? WHERE id=?`, input.Title, now, input.PlaylistID)
+		result, err := tx.ExecContext(ctx, `UPDATE Playlist SET title=?,lastEditTime=strftime('%s') WHERE id=?`, input.Title, input.PlaylistID)
 		if err != nil { return fmt.Errorf("playlist title already exists: %w", err) }; return requireOne(result)
 	case "delete":
-		var parent, next int64
-		if err := tx.QueryRowContext(ctx, `SELECT parentListId,nextListId FROM Playlist WHERE id=?`, input.PlaylistID).Scan(&parent, &next); err != nil { return err }
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM Playlist WHERE id=?`, input.PlaylistID).Scan(&exists); err != nil { return err }
 		var children int; if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM Playlist WHERE parentListId=?`, input.PlaylistID).Scan(&children); err != nil { return err }
 		if children != 0 { return errors.New("playlist contains child playlists") }
-		var previous int64
-		err := tx.QueryRowContext(ctx, `SELECT id FROM Playlist WHERE parentListId=? AND nextListId=?`, parent, input.PlaylistID).Scan(&previous)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) { return errors.New("playlist chain is ambiguous") }
-		result, err := tx.ExecContext(ctx, `DELETE FROM Playlist WHERE id=?`, input.PlaylistID); if err != nil { return err }; if err = requireOne(result); err != nil { return err }
-		if previous != 0 { _, err = tx.ExecContext(ctx, `UPDATE Playlist SET nextListId=?,lastEditTime=? WHERE id=?`, next, now, previous) }; return err
+		result, err := tx.ExecContext(ctx, `DELETE FROM Playlist WHERE id=?`, input.PlaylistID); if err != nil { return err }; return requireOne(result)
 	case "replaceTracks":
 		var exists int; if err := tx.QueryRowContext(ctx, `SELECT 1 FROM Playlist WHERE id=?`, input.PlaylistID).Scan(&exists); err != nil { return err }
-		type identity struct { uuid string; id int64 }; identities := make([]identity, 0, len(input.TrackIDs))
-		for _, localID := range input.TrackIDs { var v identity; if err := tx.QueryRowContext(ctx, `SELECT coalesce(originDatabaseUuid,''),coalesce(originTrackId,0) FROM Track WHERE id=?`, localID).Scan(&v.uuid, &v.id); err != nil { return fmt.Errorf("track %d not found: %w", localID, err) }; if v.uuid == "" || v.id <= 0 { return fmt.Errorf("track %d has no origin identity", localID) }; identities = append(identities, v) }
+		var databaseUUID string; if err := tx.QueryRowContext(ctx, `SELECT coalesce(uuid,'') FROM Information LIMIT 1`).Scan(&databaseUUID); err != nil || databaseUUID == "" { return errors.New("library uuid unavailable") }
+		for _, localID := range input.TrackIDs { var found int; if err := tx.QueryRowContext(ctx, `SELECT 1 FROM Track WHERE id=?`, localID).Scan(&found); err != nil { return fmt.Errorf("track %d not found: %w", localID, err) } }
 		if _, err := tx.ExecContext(ctx, `DELETE FROM PlaylistEntity WHERE listId=?`, input.PlaylistID); err != nil { return err }
-		entityIDs := make([]int64, 0, len(identities))
-		for _, v := range identities { result, err := tx.ExecContext(ctx, `INSERT INTO PlaylistEntity(listId,trackId,databaseUuid,nextEntityId,membershipReference) VALUES(?,?,?,NULL,0)`, input.PlaylistID, v.id, v.uuid); if err != nil { return err }; id, err := result.LastInsertId(); if err != nil { return err }; entityIDs = append(entityIDs, id) }
-		for index, id := range entityIDs { next := int64(0); if index+1 < len(entityIDs) { next = entityIDs[index+1] }; if _, err := tx.ExecContext(ctx, `UPDATE PlaylistEntity SET nextEntityId=? WHERE id=?`, next, id); err != nil { return err } }
-		_, err := tx.ExecContext(ctx, `UPDATE Playlist SET lastEditTime=? WHERE id=?`, now, input.PlaylistID); return err
+		var previous int64
+		for _, localID := range input.TrackIDs {
+			result, err := tx.ExecContext(ctx, `INSERT INTO PlaylistEntity(listId,trackId,databaseUuid,nextEntityId,membershipReference) VALUES(?,?,?,0,0)`, input.PlaylistID, localID, databaseUUID); if err != nil { return err }
+			entityID, err := result.LastInsertId(); if err != nil { return err }
+			if previous != 0 { if _, err = tx.ExecContext(ctx, `UPDATE PlaylistEntity SET nextEntityId=? WHERE id=?`, entityID, previous); err != nil { return err } }
+			previous = entityID
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE Playlist SET lastEditTime=strftime('%s') WHERE id=?`, input.PlaylistID); return err
 	}
 	return errors.New("unsupported action")
 }
@@ -259,8 +268,8 @@ func (s *server) playlistSchema(w http.ResponseWriter, r *http.Request) {
 		"sequences": `SELECT name,seq FROM sqlite_sequence WHERE name IN ('Playlist','PlaylistEntity') ORDER BY name`,
 		"playlistSamples": `SELECT id,title,parentListId,isPersisted,nextListId,lastEditTime,isExplicitlyExported FROM Playlist ORDER BY id LIMIT 10`,
 		"playlistTailSamples": `SELECT id,title,parentListId,isPersisted,nextListId,lastEditTime,isExplicitlyExported FROM Playlist ORDER BY id DESC LIMIT 10`,
-		"entitySamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,pe.membershipReference,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId LIMIT 10`,
-		"entityTailSamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,pe.membershipReference,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId ORDER BY pe.id DESC LIMIT 10`,
+		"entitySamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,pe.membershipReference,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON (t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId) OR (pe.databaseUuid=(SELECT uuid FROM Information LIMIT 1) AND t.id=pe.trackId) LIMIT 10`,
+		"entityTailSamples": `SELECT pe.id,pe.listId,pe.trackId,pe.databaseUuid,pe.nextEntityId,pe.membershipReference,t.id AS localTrackId,t.originDatabaseUuid,t.originTrackId FROM PlaylistEntity pe LEFT JOIN Track t ON (t.originDatabaseUuid=pe.databaseUuid AND t.originTrackId=pe.trackId) OR (pe.databaseUuid=(SELECT uuid FROM Information LIMIT 1) AND t.id=pe.trackId) ORDER BY pe.id DESC LIMIT 10`,
 	}
 	result := map[string]any{"schemaVersion": version}
 	for name, query := range queries {

@@ -82,9 +82,15 @@ func TestPlaylistMutationsPreserveChainsAndOriginIdentity(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:playlist-test?mode=memory&cache=shared&_pragma=foreign_keys(1)")
 	if err != nil { t.Fatal(err) }; defer db.Close(); db.SetMaxOpenConns(1)
 	_, err = db.Exec(`
+		CREATE TABLE Information(uuid TEXT,lastRekordBoxLibraryImportReadCounter INTEGER);
 		CREATE TABLE Playlist(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT,parentListId INTEGER,isPersisted BOOLEAN,nextListId INTEGER,lastEditTime DATETIME,isExplicitlyExported BOOLEAN,UNIQUE(title,parentListId),UNIQUE(parentListId,nextListId));
 		CREATE TABLE PlaylistEntity(id INTEGER PRIMARY KEY AUTOINCREMENT,listId INTEGER,trackId INTEGER,databaseUuid TEXT,nextEntityId INTEGER,membershipReference INTEGER,UNIQUE(listId,databaseUuid,trackId),FOREIGN KEY(listId) REFERENCES Playlist(id) ON DELETE CASCADE);
 		CREATE TABLE Track(id INTEGER PRIMARY KEY,originDatabaseUuid TEXT,originTrackId INTEGER);
+		CREATE TRIGGER trigger_before_insert_List BEFORE INSERT ON Playlist BEGIN UPDATE Playlist SET nextListId=-(1+nextListId) WHERE nextListId=NEW.nextListId AND parentListId=NEW.parentListId; END;
+		CREATE TRIGGER trigger_after_insert_List AFTER INSERT ON Playlist BEGIN UPDATE Playlist SET nextListId=NEW.id WHERE nextListId=-(1+NEW.nextListId) AND parentListId=NEW.parentListId; END;
+		CREATE TRIGGER trigger_after_delete_List AFTER DELETE ON Playlist BEGIN UPDATE Playlist SET nextListId=OLD.nextListId WHERE nextListId=OLD.id; DELETE FROM Playlist WHERE parentListId=OLD.id; END;
+		CREATE TRIGGER trigger_before_delete_PlaylistEntity BEFORE DELETE ON PlaylistEntity BEGIN UPDATE PlaylistEntity SET nextEntityId=OLD.nextEntityId WHERE nextEntityId=OLD.id AND listId=OLD.listId; END;
+		INSERT INTO Information VALUES('library-current',0);
 		INSERT INTO Playlist(id,title,parentListId,isPersisted,nextListId,isExplicitlyExported) VALUES(2,'First',0,1,0,1);
 		INSERT INTO Track VALUES(100,'library-a',7),(101,'library-a',9);`)
 	if err != nil { t.Fatal(err) }
@@ -95,8 +101,8 @@ func TestPlaylistMutationsPreserveChainsAndOriginIdentity(t *testing.T) {
 	tx, _ = db.Begin(); if err = mutatePlaylist(context.Background(), tx, &id, playlistRequest{Action:"replaceTracks",PlaylistID:id,TrackIDs:[]int64{101,100}}); err != nil { t.Fatal(err) }; if err = tx.Commit(); err != nil { t.Fatal(err) }
 	rows, err := db.Query(`SELECT trackId,databaseUuid,nextEntityId,membershipReference FROM PlaylistEntity WHERE listId=? ORDER BY id`, id); if err != nil { t.Fatal(err) }; defer rows.Close()
 	var gotTracks, gotNext []int64
-	for rows.Next() { var track, entityNext, membership int64; var uuid string; if err = rows.Scan(&track,&uuid,&entityNext,&membership); err != nil { t.Fatal(err) }; if uuid != "library-a" || membership != 0 { t.Fatalf("uuid=%q membership=%d",uuid,membership) }; gotTracks=append(gotTracks,track); gotNext=append(gotNext,entityNext) }
-	if len(gotTracks)!=2 || gotTracks[0]!=9 || gotTracks[1]!=7 || gotNext[0]==0 || gotNext[1]!=0 { t.Fatalf("tracks=%v next=%v",gotTracks,gotNext) }
+	for rows.Next() { var track, entityNext, membership int64; var uuid string; if err = rows.Scan(&track,&uuid,&entityNext,&membership); err != nil { t.Fatal(err) }; if uuid != "library-current" || membership != 0 { t.Fatalf("uuid=%q membership=%d",uuid,membership) }; gotTracks=append(gotTracks,track); gotNext=append(gotNext,entityNext) }
+	if len(gotTracks)!=2 || gotTracks[0]!=101 || gotTracks[1]!=100 || gotNext[0]==0 || gotNext[1]!=0 { t.Fatalf("tracks=%v next=%v",gotTracks,gotNext) }
 	tx, _ = db.Begin(); if err = mutatePlaylist(context.Background(), tx, &id, playlistRequest{Action:"delete",PlaylistID:id}); err != nil { t.Fatal(err) }; if err = tx.Commit(); err != nil { t.Fatal(err) }
 	if err = db.QueryRow(`SELECT nextListId FROM Playlist WHERE id=2`).Scan(&next); err != nil || next != 0 { t.Fatalf("repaired next=%d err=%v",next,err) }
 }

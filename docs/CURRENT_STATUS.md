@@ -3,7 +3,7 @@
 
 ## Playlist-Editor 0.18 / Agent v9
 
-Der Agent schreibt jetzt Playlists auf Basis des bestätigten Engine-Schemas 3.0.2. Er verwendet die verketteten `nextListId`- und `nextEntityId`-Felder, speichert Track-Zuordnungen mit `originDatabaseUuid` und `originTrackId`, setzt `membershipReference` auf `0` und führt vor jeder Änderung das bestehende geprüfte Backup aus. Die App kann Playlists erstellen, umbenennen und löschen sowie Tracks hinzufügen, entfernen und sortieren. Nach einer erfolgreichen Änderung wird die Live-Library neu eingelesen.
+Der Agent schreibt Playlists auf Basis des bestätigten Engine-Schemas 3.0.2. Seit Agent v12 verwendet er Engines vorhandene Playlist-Trigger, lokale Track-IDs, die aktuelle Library-UUID und den nativen Import-Read-Counter zur Live-Aktualisierung. `membershipReference` bleibt `0`; vor jeder Änderung läuft das bestehende geprüfte Backup. Die App kann Playlists erstellen, umbenennen und löschen sowie Tracks hinzufügen, entfernen und sortieren.
 Dieses Dokument beschreibt den praktisch bestätigten Stand. Ältere Abschnitte in `VALIDATION.md` bleiben als Entwicklungshistorie erhalten.
 
 ## Ausgerollte Versionen

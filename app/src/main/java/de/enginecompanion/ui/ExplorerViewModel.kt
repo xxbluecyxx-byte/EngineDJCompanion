@@ -146,7 +146,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
                 val refreshed = withContext(Dispatchers.IO) { engineXClient.snapshot(engineXSecrets.host(), code, snapshot.drive).also(engineXCache::save) }
                 mutable.update { current -> current.copy(remoteLibrary = refreshed, remoteActive = true,
                     playlist = current.playlist?.takeIf { id -> refreshed.playlists.any { it.id == id } },
-                    engineXStatus = "Playlist gespeichert · Prime übernimmt sie beim nächsten Neustart · Sicherung ${result.backup?.substringAfterLast('/') ?: "erstellt"}") }
+                    engineXStatus = "Playlist live an Prime übergeben · Sicherung ${result.backup?.substringAfterLast('/') ?: "erstellt"}") }
                 refresh(); onComplete(true)
             } catch (e: Exception) {
                 mutable.update { it.copy(error = e.message ?: "Playlist konnte nicht geändert werden.", engineXStatus = "Playlist-Änderung fehlgeschlagen") }

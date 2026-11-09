@@ -20,6 +20,7 @@ Die Cue-Route ersetzt ausschließlich die acht Hot-Cue-Slots im vorhandenen `qui
 Die Beatgrid-Route bewahrt Standardmarker, Beatnummern und unbekannte Felder. Sie schreibt angepasste Marker mit dem gewünschten BPM und Offset und setzt ebenfalls Engines Performance-Änderungsflag.
 Der Playlist-Schema-Endpunkt in Agent v8 ist strikt lesend und bestätigte die realen Tabellen, Pflichtfelder, Indizes, ID-Bereiche, Sequenzen, Statusfelder und Herkunftszuordnungen. Agent v9 nutzt diese Werte für transaktionales Erstellen, Umbenennen, Löschen und vollständiges Neuordnen von Playlists. Dabei werden die nativen Verkettungen und Origin-Track-IDs geschrieben und vor dem Commit die Fremdschlüssel geprüft.
 Engine hält den Playlist-Baum im Arbeitsspeicher und bietet auf dem Referenzgerät weder `ExecReload`, ein Reload-Signal noch eine zugängliche D-Bus-Methode. Ein Neustart von `engine.service` löst dort einen Geräteneustart aus und wird deshalb vom Agenten nicht angeboten. Playlist-Änderungen werden beim nächsten regulären Neustart sichtbar.
+Agent v12 folgt stattdessen dem vorhandenen EngineX-Datenpfad: Engines native Playlist-Trigger pflegen die Ketten, Mitgliedschaften verwenden lokale Track-IDs und die aktuelle Library-UUID, und `Information.lastRekordBoxLibraryImportReadCounter` benachrichtigt das laufende Library-Modell. Es wird kein Dienst neu gestartet.
 
 ## Build
 
