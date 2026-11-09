@@ -31,7 +31,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 13
+	agentVersion  = 14
 )
 
 type drive struct {
@@ -221,9 +221,13 @@ func mutatePlaylist(ctx context.Context, tx *sql.Tx, playlistID *int64, input pl
 	switch input.Action {
 	case "create":
 		if input.ParentID != 0 { var exists int; if err := tx.QueryRowContext(ctx, `SELECT 1 FROM Playlist WHERE id=?`, input.ParentID).Scan(&exists); err != nil { return fmt.Errorf("parent playlist not found: %w", err) } }
-		result, err := tx.ExecContext(ctx, `INSERT INTO Playlist(title,parentListId,isPersisted,nextListId,isExplicitlyExported,lastEditTime) VALUES(?,?,1,0,1,strftime('%s'))`, input.Title, input.ParentID)
+		_, err := tx.ExecContext(ctx, `INSERT INTO Playlist(title,parentListId,isPersisted,nextListId,isExplicitlyExported,lastEditTime) VALUES(?,?,1,0,1,strftime('%s'))`, input.Title, input.ParentID)
 		if err != nil { return fmt.Errorf("playlist already exists: %w", err) }
-		id, err := result.LastInsertId(); if err != nil { return err }; *playlistID = id
+		var id int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM Playlist WHERE title=? AND parentListId=?`, input.Title, input.ParentID).Scan(&id); err != nil {
+			return fmt.Errorf("created playlist id lookup failed: %w", err)
+		}
+		*playlistID = id
 		return nil
 	case "rename":
 		result, err := tx.ExecContext(ctx, `UPDATE Playlist SET title=?,lastEditTime=strftime('%s') WHERE id=?`, input.Title, input.PlaylistID)
