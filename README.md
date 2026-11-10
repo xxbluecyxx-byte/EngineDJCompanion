@@ -12,6 +12,8 @@ Version 0.18.4 ersetzt die globale Fremdschlüsselprüfung durch eine gezielte V
 
 Version 0.18.5 ermittelt die ID einer neu angelegten Playlist nach Engines nativer Trigger-Verarbeitung über den eindeutigen Titel und die Elternliste. Der Agent ist dadurch nicht mehr von `LastInsertId()` des SQLite-Treibers abhängig.
 
+Die Untersuchung zur noch fehlenden Live-Aktualisierung der laufenden Engine-Library und das vorbereitete, rein lesende Diagnosewerkzeug stehen in [docs/LIVE_LIBRARY_RELOAD.md](docs/LIVE_LIBRARY_RELOAD.md).
+
 **Der praktisch bestätigte Gesamtstand einschließlich Versionen, Schreibsicherheit und rebootfester Agent-Installation steht in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).** Ältere Abschnitte dieses Dokuments beschreiben teilweise frühere Entwicklungsphasen.
 
 ## USB-Import

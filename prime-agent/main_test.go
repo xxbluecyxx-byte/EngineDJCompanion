@@ -8,8 +8,21 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
+
+func TestPlaylistRevisionStatus(t *testing.T) {
+	s := &server{}
+	s.playlistRevision.Store(7)
+	request := httptest.NewRequest(http.MethodGet, "/playlist-revision", nil)
+	response := httptest.NewRecorder()
+	s.playlistRevisionStatus(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "{\"revision\":7}\n" {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+}
 
 func TestReplaceQuickCuesPreservesTailAndSlots(t *testing.T) {
 	var raw bytes.Buffer

@@ -13,6 +13,9 @@ PERSISTENT_UNIT="$INSTALL_DIR/$SERVICE"
 TOKEN_FILE="$DATA_ROOT/state/access-token"
 MARKER_BEGIN="# BEGIN ENGINE COMPANION AGENT"
 MARKER_END="# END ENGINE COMPANION AGENT"
+QML_FILE="$DATA_ROOT/ui/packs/en/Skins/Embedded/EmbeddedMain.qml"
+QML_MARKER_BEGIN="    // BEGIN ENGINE COMPANION LIVE PLAYLIST"
+QML_MARKER_END="    // END ENGINE COMPANION LIVE PLAYLIST"
 
 SOURCE_BINARY=${1:-./engine-companion-agent}
 SOURCE_UNIT=${2:-./engine-companion-agent.service}
@@ -34,6 +37,7 @@ done
 [ -f "$SOURCE_UNINSTALL" ] || fail "Deinstallationsskript fehlt: $SOURCE_UNINSTALL"
 [ -s "$TOKEN_FILE" ] || fail "EngineX-Zugriffscode fehlt: $TOKEN_FILE"
 [ -f "$BOOT_SCRIPT" ] || fail "Persistenter Boot-Aktivator fehlt: $BOOT_SCRIPT"
+[ -f "$QML_FILE" ] || fail "EngineX EmbeddedMain.qml fehlt: $QML_FILE"
 
 if [ -f "$SOURCE_SHA" ]; then
     expected=$(awk 'NR == 1 { print $1 }' "$SOURCE_SHA")
@@ -52,11 +56,16 @@ runtime_before="$INSTALL_DIR/runtime-unit.before.$$"
 boot_clean="$INSTALL_DIR/boot-clean.$$"
 hook_stage="$INSTALL_DIR/boot-hook.$$"
 boot_stage="$BOOT_SCRIPT.new.$$"
+qml_before="$INSTALL_DIR/EmbeddedMain.before.$$"
+qml_clean="$INSTALL_DIR/EmbeddedMain.clean.$$"
+qml_hook="$INSTALL_DIR/EmbeddedMain.hook.$$"
+qml_stage="$QML_FILE.new.$$"
 cp "$SOURCE_BINARY" "$stage"
 chmod 755 "$stage"
 cp "$SOURCE_UNIT" "$unit_stage"
 chmod 644 "$unit_stage"
 cp "$BOOT_SCRIPT" "$boot_before"
+cp "$QML_FILE" "$qml_before"
 
 had_binary=0
 had_unit=0
@@ -83,6 +92,7 @@ rollback() {
     systemctl stop "$SERVICE" >/dev/null 2>&1 || true
     cp "$boot_before" "$BOOT_SCRIPT" 2>/dev/null || true
     chmod 755 "$BOOT_SCRIPT" 2>/dev/null || true
+    cp "$qml_before" "$QML_FILE" 2>/dev/null || true
     if [ "$had_binary" = 1 ] && [ -f "$PREVIOUS" ]; then
         cp "$PREVIOUS" "$TARGET"
         chmod 755 "$TARGET"
@@ -103,7 +113,7 @@ rollback() {
     if [ "$had_binary" = 1 ] && [ "$was_active" = 1 ]; then
         systemctl restart "$SERVICE" >/dev/null 2>&1 || true
     fi
-    rm -f "$stage" "$unit_stage" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$boot_stage"
+    rm -f "$stage" "$unit_stage" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$boot_stage" "$qml_before" "$qml_clean" "$qml_hook" "$qml_stage"
     exit 1
 }
 
@@ -152,10 +162,74 @@ sh -n "$boot_stage" || rollback
 chmod 755 "$boot_stage"
 mv "$boot_stage" "$BOOT_SCRIPT"
 
+awk -v begin="$QML_MARKER_BEGIN" -v end="$QML_MARKER_END" '
+    $0 == begin { skip=1; next }
+    $0 == end { skip=0; next }
+    !skip { print }
+' "$QML_FILE" >"$qml_clean"
+cat >"$qml_hook" <<'QMLHOOK'
+    // BEGIN ENGINE COMPANION LIVE PLAYLIST
+    property int companionPlaylistRevision: -1
+    property int companionRefreshPasses: 0
+
+    function companionPollPlaylistRevision() {
+        const request = new XMLHttpRequest()
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE || request.status !== 200) return
+            try {
+                const revision = JSON.parse(request.responseText).revision
+                if (root.companionPlaylistRevision < 0) {
+                    root.companionPlaylistRevision = revision
+                } else if (revision > root.companionPlaylistRevision) {
+                    root.companionPlaylistRevision = revision
+                    Planck.librarianController.craylistController.reReadStructure()
+                    root.companionRefreshPasses = 2
+                    companionCollectionRefresh.restart()
+                }
+            } catch (error) {
+                console.warn("Engine Companion playlist notification failed: " + error)
+            }
+        }
+        request.open("GET", "http://127.0.0.1:8082/playlist-revision", true)
+        request.send()
+    }
+
+    Timer {
+        interval: 750
+        running: true
+        repeat: true
+        onTriggered: root.companionPollPlaylistRevision()
+    }
+
+    Timer {
+        id: companionCollectionRefresh
+        interval: 400
+        repeat: false
+        onTriggered: {
+            Planck.librarianController.currentCollectionController.refreshDisplayedCollection()
+            root.companionRefreshPasses--
+            if (root.companionRefreshPasses > 0) restart()
+        }
+    }
+    // END ENGINE COMPANION LIVE PLAYLIST
+QMLHOOK
+awk -v hook="$qml_hook" '
+    /onCreateComponentErrorStringChanged:/ && !inserted {
+        while ((getline line < hook) > 0) print line
+        close(hook)
+        inserted=1
+    }
+    { print }
+    END { if (!inserted) exit 42 }
+' "$qml_clean" >"$qml_stage" || rollback
+chmod 644 "$qml_stage"
+mv "$qml_stage" "$QML_FILE"
+
 cp "$PERSISTENT_UNIT" "$RUNTIME_UNIT" || rollback
 chmod 644 "$RUNTIME_UNIT"
 systemctl daemon-reload || rollback
 systemctl restart "$SERVICE" || rollback
+systemctl restart engine.service || rollback
 
 token=$(cat "$TOKEN_FILE")
 healthy=0
@@ -181,8 +255,9 @@ mv "$INSTALL_DIR/health.json.new" "$INSTALL_DIR/health.json"
     echo "boot_hook=$BOOT_SCRIPT"
 } >"$INSTALL_DIR/install-state"
 
-rm -f "$PERSISTENT_UNIT.previous" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage"
+rm -f "$PERSISTENT_UNIT.previous" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$qml_before" "$qml_clean" "$qml_hook"
 grep -qF "$MARKER_BEGIN" "$BOOT_SCRIPT" || fail "Boot-Hook wurde nicht gespeichert"
+grep -qF "$QML_MARKER_BEGIN" "$QML_FILE" || fail "Live-Playlist-Hook wurde nicht gespeichert"
 systemctl is-active "$SERVICE" >/dev/null || fail "Agent ist nach Healthcheck nicht aktiv"
 echo "Engine Companion Agent wurde installiert, geprüft und in boot-activate.sh registriert."
 cat "$INSTALL_DIR/health.json"

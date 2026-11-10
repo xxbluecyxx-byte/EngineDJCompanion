@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -31,7 +32,8 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 14
+	agentVersion  = 15
+	localNotifyAddress = "127.0.0.1:8082"
 )
 
 type drive struct {
@@ -52,6 +54,7 @@ type server struct {
 	semaphore chan struct{}
 	backupMu  sync.Mutex
 	backups   map[string]string
+	playlistRevision atomic.Uint64
 }
 
 type analysisResponse struct {
@@ -103,6 +106,14 @@ func main() {
 	mux.HandleFunc("/api/companion/v1/playlists/schema", s.authorize(s.playlistSchema))
 	mux.HandleFunc("/api/companion/v1/playlists", s.authorize(s.playlists))
 	mux.HandleFunc("/api/companion/v1/tracks/", s.authorize(s.track))
+	localMux := http.NewServeMux()
+	localMux.HandleFunc("/playlist-revision", s.playlistRevisionStatus)
+	go func() {
+		log.Printf("Engine Companion local UI notification listening on %s", localNotifyAddress)
+		if err := http.ListenAndServe(localNotifyAddress, localMux); err != nil {
+			log.Fatalf("local UI notification failed: %v", err)
+		}
+	}()
 	httpServer := &http.Server{
 		Addr:              listenAddress,
 		Handler:           mux,
@@ -144,6 +155,16 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true, "playlistLiveNotify": true})
+}
+
+func (s *server) playlistRevisionStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"revision": s.playlistRevision.Load()})
 }
 
 func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +210,7 @@ func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
 		_ = tx.Rollback(); http.Error(w, "playlist validation failed: "+err.Error(), http.StatusConflict); return
 	}
 	if err = tx.Commit(); err != nil { http.Error(w, "playlist commit failed", http.StatusInternalServerError); return }
+	s.playlistRevision.Add(1)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, map[string]any{"action": input.Action, "playlistId": playlistID, "backup": backup})
 }
