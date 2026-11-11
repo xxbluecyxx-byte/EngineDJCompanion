@@ -266,12 +266,15 @@ cat >"$qml_hook" <<'QMLHOOK'
     }
 
     function companionPollNativeCommand() {
-        if (companionPendingCommand) return
+        if (!craylists.visible || !craylists.enabled || companionPendingCommand) return
         const request = new XMLHttpRequest()
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE || request.status !== 200) return
             try {
                 companionPendingCommand = JSON.parse(request.responseText)
+                companionTrace("native-command-received", {id:companionPendingCommand.id, action:companionPendingCommand.action,
+                                                            title:companionPendingCommand.title, visible:craylists.visible,
+                                                            rootIndex:String(rootModelIndex), parentIndex:String(currentListModel.sourceParentIndex)})
                 companionExecuteCommand(companionPendingCommand)
                 if (companionPendingCommand.action === "delete") companionCommandCheck.restart()
                 else companionCompleteCommand(true, "")

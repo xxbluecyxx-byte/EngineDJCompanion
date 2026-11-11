@@ -32,7 +32,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 20
+	agentVersion  = 21
 	localNotifyAddress = "127.0.0.1:8082"
 	playlistTracePath = "/data/sc5000-custom/companion/playlist-trace.jsonl"
 )

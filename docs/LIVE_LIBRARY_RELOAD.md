@@ -32,6 +32,16 @@ alle SQLite-Trigger und der Ausgangszustand von `Playlist` und
 `PRAGMA data_version` erkannt und mit Vorher-/Nachher-Snapshots sowie dem
 Zustand von Journal-, WAL- und SHM-Dateien festgehalten.
 
+Der Referenzlauf vom 11. November 2026 bestätigte, dass Engines sichtbarer
+Playlist-Editor die externe Library direkt aktualisiert: `createList` fügte
+eine `Playlist`-Zeile ein, `addTracksToList` erzeugte eine `PlaylistEntity`, und
+`removeList` entfernte beide wieder. Die Trigger
+`trigger_before_insert_List`, `trigger_after_insert_List`,
+`trigger_before_delete_PlaylistEntity` und `trigger_after_delete_List` pflegten
+dabei die verketteten `nextListId`- und `nextEntityId`-Felder. Native Befehle
+dürfen nur von der sichtbaren `Craylist`-Instanz abgeholt werden, da Engine
+mehrere Instanzen dieser Komponente vorhält.
+
 ## Bestätigter Stand
 
 Playlist- und Trackänderungen werden korrekt und dauerhaft in `Database2/m.db`
