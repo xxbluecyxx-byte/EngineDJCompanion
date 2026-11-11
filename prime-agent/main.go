@@ -32,7 +32,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 22
+	agentVersion  = 23
 	localNotifyAddress = "127.0.0.1:8082"
 	playlistTracePath = "/data/sc5000-custom/companion/playlist-trace.jsonl"
 )
@@ -73,6 +73,7 @@ type nativeCommand struct {
 	ParentID   int64   `json:"parentId"`
 	TrackIDs   []int64 `json:"trackIds"`
 	TargetTitle string  `json:"targetTitle,omitempty"`
+	TargetRow   int64   `json:"targetRow,omitempty"`
 }
 
 type nativeResult struct {
@@ -417,6 +418,13 @@ func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
 		if openErr != nil { http.Error(w, "playlist lookup failed", http.StatusServiceUnavailable); return }
 		db.SetMaxOpenConns(1)
 		lookupErr := db.QueryRowContext(r.Context(), `SELECT title FROM Playlist WHERE id=?`, input.PlaylistID).Scan(&command.TargetTitle)
+		if lookupErr == nil {
+			lookupErr = db.QueryRowContext(r.Context(), `WITH RECURSIVE chain(id,pos) AS (
+				SELECT p.id,0 FROM Playlist p WHERE p.parentListId=(SELECT parentListId FROM Playlist WHERE id=?)
+				AND NOT EXISTS(SELECT 1 FROM Playlist x WHERE x.parentListId=p.parentListId AND x.nextListId=p.id)
+				UNION ALL SELECT n.id,chain.pos+1 FROM chain JOIN Playlist c ON c.id=chain.id JOIN Playlist n ON n.id=c.nextListId
+			) SELECT pos FROM chain WHERE id=?`, input.PlaylistID, input.PlaylistID).Scan(&command.TargetRow)
+		}
 		_ = db.Close()
 		if lookupErr != nil { http.Error(w, "playlist lookup failed: "+lookupErr.Error(), http.StatusNotFound); return }
 	}

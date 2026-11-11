@@ -257,6 +257,7 @@ cat >"$qml_hook" <<'QMLHOOK'
             lists.createList(index, command.title)
         } else {
             index = companionFindList(rootIndex, command.playlistId, command.targetTitle || "", 0)
+            if (!index && command.targetRow >= 0) index = controller.listModel.index(command.targetRow, 0, currentListModel.sourceParentIndex)
             if (!index) throw new Error("playlist was not found in Engine")
             if (command.action === "delete") lists.removeList(index)
             else if (command.action === "rename") lists.renameList(index, command.title)
