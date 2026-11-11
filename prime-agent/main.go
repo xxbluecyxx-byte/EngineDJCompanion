@@ -32,7 +32,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 21
+	agentVersion  = 22
 	localNotifyAddress = "127.0.0.1:8082"
 	playlistTracePath = "/data/sc5000-custom/companion/playlist-trace.jsonl"
 )
@@ -72,6 +72,7 @@ type nativeCommand struct {
 	Title      string  `json:"title"`
 	ParentID   int64   `json:"parentId"`
 	TrackIDs   []int64 `json:"trackIds"`
+	TargetTitle string  `json:"targetTitle,omitempty"`
 }
 
 type nativeResult struct {
@@ -410,6 +411,15 @@ func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
 	backup, err := s.backupLibrary(r, d.db, driveName)
 	if err != nil { http.Error(w, "backup failed: "+err.Error(), http.StatusServiceUnavailable); return }
 	command := nativeCommand{Action: input.Action, PlaylistID: input.PlaylistID, Title: input.Title, ParentID: input.ParentID, TrackIDs: input.TrackIDs}
+	if input.PlaylistID > 0 {
+		dsn := (&url.URL{Scheme: "file", Path: d.db, RawQuery: "mode=ro&_pragma=busy_timeout(2000)"}).String()
+		db, openErr := sql.Open("sqlite", dsn)
+		if openErr != nil { http.Error(w, "playlist lookup failed", http.StatusServiceUnavailable); return }
+		db.SetMaxOpenConns(1)
+		lookupErr := db.QueryRowContext(r.Context(), `SELECT title FROM Playlist WHERE id=?`, input.PlaylistID).Scan(&command.TargetTitle)
+		_ = db.Close()
+		if lookupErr != nil { http.Error(w, "playlist lookup failed: "+lookupErr.Error(), http.StatusNotFound); return }
+	}
 	if err = s.executeNativePlaylistCommand(r.Context(), &command); err != nil {
 		http.Error(w, "native playlist change failed: "+err.Error(), http.StatusConflict)
 		return

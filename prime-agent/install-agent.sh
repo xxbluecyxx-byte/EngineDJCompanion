@@ -256,7 +256,7 @@ cat >"$qml_hook" <<'QMLHOOK'
             if (!index) throw new Error("parent playlist was not found in Engine")
             lists.createList(index, command.title)
         } else {
-            index = companionFindList(rootIndex, command.playlistId, "", 0)
+            index = companionFindList(rootIndex, command.playlistId, command.targetTitle || "", 0)
             if (!index) throw new Error("playlist was not found in Engine")
             if (command.action === "delete") lists.removeList(index)
             else if (command.action === "rename") lists.renameList(index, command.title)
