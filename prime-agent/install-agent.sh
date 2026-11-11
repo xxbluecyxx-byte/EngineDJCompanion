@@ -169,28 +169,80 @@ awk -v begin="$QML_MARKER_BEGIN" -v end="$QML_MARKER_END" '
 ' "$QML_FILE" >"$qml_clean"
 cat >"$qml_hook" <<'QMLHOOK'
     // BEGIN ENGINE COMPANION LIVE PLAYLIST
-    property int companionPlaylistRevision: -1
-    property int companionRefreshPasses: 0
+    property int companionLastCommand: 0
+    property var companionPendingCommand: null
 
-    function companionPollPlaylistRevision() {
+    function companionRoles(index) {
+        try { return Planck.librarianController.devicesController.selectedDeviceCraylistModel.getRoles(index) }
+        catch (error) { return null }
+    }
+
+    function companionRole(roles, names) {
+        if (!roles) return undefined
+        for (var i = 0; i < names.length; ++i) {
+            if (roles[names[i]] !== undefined) return roles[names[i]]
+        }
+        return undefined
+    }
+
+    function companionFindList(parent, uniqueId, title, depth) {
+        if (depth > 20) return null
+        const model = Planck.librarianController.devicesController.selectedDeviceCraylistModel
+        const rows = model.rowCount(parent)
+        for (var row = 0; row < rows; ++row) {
+            const index = model.index(row, 0, parent)
+            const roles = companionRoles(index)
+            const id = companionRole(roles, ["uniqueListId", "listUniqueId", "uniqueId", "id"])
+            const name = companionRole(roles, ["titleRole", "title", "name"])
+            if ((uniqueId > 0 && Number(id) === Number(uniqueId)) || (title && String(name) === title)) return index
+            const child = companionFindList(index, uniqueId, title, depth + 1)
+            if (child) return child
+        }
+        return null
+    }
+
+    function companionCompleteCommand(ok, error) {
+        const request = new XMLHttpRequest()
+        request.open("POST", "http://127.0.0.1:8082/native-command/complete", true)
+        request.setRequestHeader("Content-Type", "application/json")
+        request.send(JSON.stringify({id: companionPendingCommand.id, ok: ok, error: error || ""}))
+        companionLastCommand = companionPendingCommand.id
+        companionPendingCommand = null
+    }
+
+    function companionExecuteCommand(command) {
+        const lists = Planck.librarianController.craylistController
+        const devices = Planck.librarianController.devicesController
+        const rootIndex = devices.selectedDeviceCraylistRootModelIndex
+        var index
+        if (command.action === "create") {
+            index = command.parentId > 0 ? companionFindList(rootIndex, command.parentId, "", 0) : rootIndex
+            if (!index) throw new Error("parent playlist was not found in Engine")
+            lists.createList(index, command.title)
+        } else {
+            index = companionFindList(rootIndex, command.playlistId, "", 0)
+            if (!index) throw new Error("playlist was not found in Engine")
+            if (command.action === "delete") lists.removeList(index)
+            else if (command.action === "rename") lists.renameList(index, command.title)
+            else if (command.action === "replaceTracks") throw new Error("native track replacement is not enabled yet")
+            else throw new Error("unsupported native playlist action")
+        }
+    }
+
+    function companionPollNativeCommand() {
+        if (companionPendingCommand) return
         const request = new XMLHttpRequest()
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE || request.status !== 200) return
             try {
-                const revision = JSON.parse(request.responseText).revision
-                if (root.companionPlaylistRevision < 0) {
-                    root.companionPlaylistRevision = revision
-                } else if (revision > root.companionPlaylistRevision) {
-                    root.companionPlaylistRevision = revision
-                    Planck.librarianController.craylistController.reReadStructure()
-                    root.companionRefreshPasses = 2
-                    companionCollectionRefresh.restart()
-                }
+                companionPendingCommand = JSON.parse(request.responseText)
+                companionExecuteCommand(companionPendingCommand)
+                companionCommandCheck.restart()
             } catch (error) {
-                console.warn("Engine Companion playlist notification failed: " + error)
+                if (companionPendingCommand) companionCompleteCommand(false, String(error))
             }
         }
-        request.open("GET", "http://127.0.0.1:8082/playlist-revision", true)
+        request.open("GET", "http://127.0.0.1:8082/native-command?after=" + companionLastCommand, true)
         request.send()
     }
 
@@ -198,17 +250,24 @@ cat >"$qml_hook" <<'QMLHOOK'
         interval: 750
         running: true
         repeat: true
-        onTriggered: root.companionPollPlaylistRevision()
+        onTriggered: root.companionPollNativeCommand()
     }
 
     Timer {
-        id: companionCollectionRefresh
-        interval: 400
+        id: companionCommandCheck
+        interval: 500
         repeat: false
         onTriggered: {
-            Planck.librarianController.currentCollectionController.refreshDisplayedCollection()
-            root.companionRefreshPasses--
-            if (root.companionRefreshPasses > 0) restart()
+            if (!companionPendingCommand) return
+            const command = companionPendingCommand
+            const rootIndex = Planck.librarianController.devicesController.selectedDeviceCraylistRootModelIndex
+            const byId = command.playlistId > 0 ? companionFindList(rootIndex, command.playlistId, "", 0) : null
+            const byTitle = command.title ? companionFindList(rootIndex, 0, command.title, 0) : null
+            if (command.action === "create" && byTitle) companionCompleteCommand(true, "")
+            else if (command.action === "delete" && !byId) companionCompleteCommand(true, "")
+            else if (command.action === "rename" && byTitle) companionCompleteCommand(true, "")
+            else if (command.action === "replaceTracks") companionCompleteCommand(true, "")
+            else restart()
         }
     }
     // END ENGINE COMPANION LIVE PLAYLIST

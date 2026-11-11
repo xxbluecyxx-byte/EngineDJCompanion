@@ -32,7 +32,7 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 15
+	agentVersion  = 16
 	localNotifyAddress = "127.0.0.1:8082"
 )
 
@@ -55,6 +55,26 @@ type server struct {
 	backupMu  sync.Mutex
 	backups   map[string]string
 	playlistRevision atomic.Uint64
+	nativeMu         sync.Mutex
+	nativeStateMu    sync.Mutex
+	nativeNext       atomic.Uint64
+	nativePending    *nativeCommand
+	nativeResult     chan nativeResult
+}
+
+type nativeCommand struct {
+	ID         uint64  `json:"id"`
+	Action     string  `json:"action"`
+	PlaylistID int64   `json:"playlistId"`
+	Title      string  `json:"title"`
+	ParentID   int64   `json:"parentId"`
+	TrackIDs   []int64 `json:"trackIds"`
+}
+
+type nativeResult struct {
+	ID    uint64 `json:"id"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error"`
 }
 
 type analysisResponse struct {
@@ -108,6 +128,8 @@ func main() {
 	mux.HandleFunc("/api/companion/v1/tracks/", s.authorize(s.track))
 	localMux := http.NewServeMux()
 	localMux.HandleFunc("/playlist-revision", s.playlistRevisionStatus)
+	localMux.HandleFunc("/native-command", s.nativeCommandStatus)
+	localMux.HandleFunc("/native-command/complete", s.nativeCommandComplete)
 	go func() {
 		log.Printf("Engine Companion local UI notification listening on %s", localNotifyAddress)
 		if err := http.ListenAndServe(localNotifyAddress, localMux); err != nil {
@@ -154,7 +176,7 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true, "playlistLiveNotify": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true, "playlistLiveNotify": true, "playlistNativeController": true})
 }
 
 func (s *server) playlistRevisionStatus(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +187,82 @@ func (s *server) playlistRevisionStatus(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, map[string]any{"revision": s.playlistRevision.Load()})
+}
+
+func (s *server) nativeCommandStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	after, _ := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
+	s.nativeStateMu.Lock()
+	command := s.nativePending
+	s.nativeStateMu.Unlock()
+	if command == nil || command.ID <= after {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, command)
+}
+
+func (s *server) nativeCommandComplete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var result nativeResult
+	if err := json.NewDecoder(r.Body).Decode(&result); err != nil || result.ID == 0 {
+		http.Error(w, "invalid result", http.StatusBadRequest)
+		return
+	}
+	s.nativeStateMu.Lock()
+	pending := s.nativePending
+	resultChannel := s.nativeResult
+	s.nativeStateMu.Unlock()
+	if pending == nil || pending.ID != result.ID || resultChannel == nil {
+		http.Error(w, "command is no longer pending", http.StatusConflict)
+		return
+	}
+	select {
+	case resultChannel <- result:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "result already delivered", http.StatusConflict)
+	}
+}
+
+func (s *server) executeNativePlaylistCommand(ctx context.Context, command *nativeCommand) error {
+	s.nativeMu.Lock()
+	defer s.nativeMu.Unlock()
+	command.ID = s.nativeNext.Add(1)
+	resultChannel := make(chan nativeResult, 1)
+	s.nativeStateMu.Lock()
+	s.nativePending = command
+	s.nativeResult = resultChannel
+	s.nativeStateMu.Unlock()
+	defer func() {
+		s.nativeStateMu.Lock()
+		s.nativePending = nil
+		s.nativeResult = nil
+		s.nativeStateMu.Unlock()
+	}()
+	timer := time.NewTimer(20 * time.Second)
+	defer timer.Stop()
+	select {
+	case result := <-resultChannel:
+		if !result.OK {
+			if result.Error == "" { result.Error = "Engine rejected the command" }
+			return errors.New(result.Error)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return errors.New("Engine UI did not acknowledge the command")
+	}
 }
 
 func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
@@ -190,29 +288,14 @@ func (s *server) playlists(w http.ResponseWriter, r *http.Request) {
 	}
 	backup, err := s.backupLibrary(r, d.db, driveName)
 	if err != nil { http.Error(w, "backup failed: "+err.Error(), http.StatusServiceUnavailable); return }
-	dsn := (&url.URL{Scheme: "file", Path: d.db, RawQuery: "mode=rw&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"}).String()
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil { http.Error(w, "library write open failed", http.StatusServiceUnavailable); return }
-	defer db.Close(); db.SetMaxOpenConns(1)
-	tx, err := db.BeginTx(r.Context(), nil)
-	if err != nil { http.Error(w, "library busy", http.StatusConflict); return }
-	if err = requireNativePlaylistTriggers(r.Context(), tx); err != nil { _ = tx.Rollback(); http.Error(w, err.Error(), http.StatusConflict); return }
-	playlistID := input.PlaylistID
-	if err = mutatePlaylist(r.Context(), tx, &playlistID, input); err != nil {
-		_ = tx.Rollback(); status := http.StatusConflict
-		if errors.Is(err, sql.ErrNoRows) { status = http.StatusNotFound }
-		http.Error(w, err.Error(), status); return
+	command := nativeCommand{Action: input.Action, PlaylistID: input.PlaylistID, Title: input.Title, ParentID: input.ParentID, TrackIDs: input.TrackIDs}
+	if err = s.executeNativePlaylistCommand(r.Context(), &command); err != nil {
+		http.Error(w, "native playlist change failed: "+err.Error(), http.StatusConflict)
+		return
 	}
-	if _, err = tx.ExecContext(r.Context(), `UPDATE Information SET lastRekordBoxLibraryImportReadCounter=COALESCE(lastRekordBoxLibraryImportReadCounter,0)+1`); err != nil {
-		_ = tx.Rollback(); http.Error(w, "library change notification failed", http.StatusConflict); return
-	}
-	if err = validatePlaylistMutation(r.Context(), tx, playlistID, input.Action); err != nil {
-		_ = tx.Rollback(); http.Error(w, "playlist validation failed: "+err.Error(), http.StatusConflict); return
-	}
-	if err = tx.Commit(); err != nil { http.Error(w, "playlist commit failed", http.StatusInternalServerError); return }
 	s.playlistRevision.Add(1)
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, map[string]any{"action": input.Action, "playlistId": playlistID, "backup": backup})
+	writeJSON(w, map[string]any{"action": input.Action, "playlistId": input.PlaylistID, "backup": backup, "native": true})
 }
 
 func validatePlaylistMutation(ctx context.Context, tx *sql.Tx, playlistID int64, action string) error {

@@ -12,6 +12,16 @@ neue oder geänderte Playlists und deren Trackinhalt im laufenden lokalen
 Collection-Modell sichtbar. Es wird weder ein Medium simuliert noch die SSD
 ausgehängt oder Engine neu gestartet.
 
+## Native Playlist-Befehle ab Agent v16
+
+Playlist-Erstellung, Umbenennung und Löschung werden nicht mehr parallel in die
+von Engine geöffnete SQLite-Datenbank geschrieben. Der Agent stellt den
+EngineX-QML-Komponenten stattdessen eine ausschließlich lokal erreichbare
+Befehlswarteschlange bereit. QML löst damit dieselben `ListsController`-Methoden
+aus wie der Bearbeitungsmodus am Prime und bestätigt das Ergebnis an den
+wartenden HTTP-Aufruf der App. Dadurch bleiben Engines Modell, Datenbank und
+Bestätigungsdialoge die maßgebliche Quelle.
+
 ## Bestätigter Stand
 
 Playlist- und Trackänderungen werden korrekt und dauerhaft in `Database2/m.db`
