@@ -237,7 +237,8 @@ cat >"$qml_hook" <<'QMLHOOK'
             try {
                 companionPendingCommand = JSON.parse(request.responseText)
                 companionExecuteCommand(companionPendingCommand)
-                companionCommandCheck.restart()
+                if (companionPendingCommand.action === "delete") companionCommandCheck.restart()
+                else companionCompleteCommand(true, "")
             } catch (error) {
                 if (companionPendingCommand) companionCompleteCommand(false, String(error))
             }
