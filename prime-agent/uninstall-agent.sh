@@ -8,7 +8,8 @@ BOOT_SCRIPT="$DATA_ROOT/bundle/boot-activate.sh"
 RUNTIME_UNIT="/run/systemd/system/$SERVICE"
 MARKER_BEGIN="# BEGIN ENGINE COMPANION AGENT"
 MARKER_END="# END ENGINE COMPANION AGENT"
-QML_FILE="$DATA_ROOT/ui/packs/en/Skins/Embedded/EmbeddedMain.qml"
+QML_FILES="$DATA_ROOT/ui/packs/en/Skins/Embedded/EmbeddedMain.qml
+$DATA_ROOT/ui/packs/en/Skins/Embedded/Views/BrowseView/Components/Craylist.qml"
 QML_MARKER_BEGIN="    // BEGIN ENGINE COMPANION LIVE PLAYLIST"
 QML_MARKER_END="    // END ENGINE COMPANION LIVE PLAYLIST"
 
@@ -29,7 +30,8 @@ if [ -f "$BOOT_SCRIPT" ]; then
     mv "$stage" "$BOOT_SCRIPT"
 fi
 
-if [ -f "$QML_FILE" ]; then
+for QML_FILE in $QML_FILES; do
+  if [ -f "$QML_FILE" ]; then
     qml_stage="$QML_FILE.new.$$"
     awk -v begin="$QML_MARKER_BEGIN" -v end="$QML_MARKER_END" '
         $0 == begin { skip=1; next }
@@ -38,8 +40,9 @@ if [ -f "$QML_FILE" ]; then
     ' "$QML_FILE" >"$qml_stage"
     chmod 644 "$qml_stage"
     mv "$qml_stage" "$QML_FILE"
-    systemctl restart engine.service >/dev/null 2>&1 || true
-fi
+  fi
+done
+systemctl restart engine.service >/dev/null 2>&1 || true
 
 rm -f "$INSTALL_DIR/$SERVICE" "$INSTALL_DIR/health.json" "$INSTALL_DIR/install-state"
 systemctl daemon-reload

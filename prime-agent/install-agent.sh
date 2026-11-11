@@ -13,7 +13,8 @@ PERSISTENT_UNIT="$INSTALL_DIR/$SERVICE"
 TOKEN_FILE="$DATA_ROOT/state/access-token"
 MARKER_BEGIN="# BEGIN ENGINE COMPANION AGENT"
 MARKER_END="# END ENGINE COMPANION AGENT"
-QML_FILE="$DATA_ROOT/ui/packs/en/Skins/Embedded/EmbeddedMain.qml"
+QML_FILE="$DATA_ROOT/ui/packs/en/Skins/Embedded/Views/BrowseView/Components/Craylist.qml"
+LEGACY_QML_FILE="$DATA_ROOT/ui/packs/en/Skins/Embedded/EmbeddedMain.qml"
 QML_MARKER_BEGIN="    // BEGIN ENGINE COMPANION LIVE PLAYLIST"
 QML_MARKER_END="    // END ENGINE COMPANION LIVE PLAYLIST"
 
@@ -38,6 +39,7 @@ done
 [ -s "$TOKEN_FILE" ] || fail "EngineX-Zugriffscode fehlt: $TOKEN_FILE"
 [ -f "$BOOT_SCRIPT" ] || fail "Persistenter Boot-Aktivator fehlt: $BOOT_SCRIPT"
 [ -f "$QML_FILE" ] || fail "EngineX EmbeddedMain.qml fehlt: $QML_FILE"
+[ -f "$LEGACY_QML_FILE" ] || fail "EngineX EmbeddedMain.qml fehlt: $LEGACY_QML_FILE"
 
 if [ -f "$SOURCE_SHA" ]; then
     expected=$(awk 'NR == 1 { print $1 }' "$SOURCE_SHA")
@@ -60,12 +62,15 @@ qml_before="$INSTALL_DIR/EmbeddedMain.before.$$"
 qml_clean="$INSTALL_DIR/EmbeddedMain.clean.$$"
 qml_hook="$INSTALL_DIR/EmbeddedMain.hook.$$"
 qml_stage="$QML_FILE.new.$$"
+legacy_qml_before="$INSTALL_DIR/EmbeddedMain.before.$$"
+legacy_qml_clean="$INSTALL_DIR/EmbeddedMain.clean.$$"
 cp "$SOURCE_BINARY" "$stage"
 chmod 755 "$stage"
 cp "$SOURCE_UNIT" "$unit_stage"
 chmod 644 "$unit_stage"
 cp "$BOOT_SCRIPT" "$boot_before"
 cp "$QML_FILE" "$qml_before"
+cp "$LEGACY_QML_FILE" "$legacy_qml_before"
 
 had_binary=0
 had_unit=0
@@ -93,6 +98,7 @@ rollback() {
     cp "$boot_before" "$BOOT_SCRIPT" 2>/dev/null || true
     chmod 755 "$BOOT_SCRIPT" 2>/dev/null || true
     cp "$qml_before" "$QML_FILE" 2>/dev/null || true
+    cp "$legacy_qml_before" "$LEGACY_QML_FILE" 2>/dev/null || true
     if [ "$had_binary" = 1 ] && [ -f "$PREVIOUS" ]; then
         cp "$PREVIOUS" "$TARGET"
         chmod 755 "$TARGET"
@@ -113,7 +119,7 @@ rollback() {
     if [ "$had_binary" = 1 ] && [ "$was_active" = 1 ]; then
         systemctl restart "$SERVICE" >/dev/null 2>&1 || true
     fi
-    rm -f "$stage" "$unit_stage" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$boot_stage" "$qml_before" "$qml_clean" "$qml_hook" "$qml_stage"
+    rm -f "$stage" "$unit_stage" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$boot_stage" "$qml_before" "$qml_clean" "$qml_hook" "$qml_stage" "$legacy_qml_before" "$legacy_qml_clean"
     exit 1
 }
 
@@ -215,7 +221,7 @@ cat >"$qml_hook" <<'QMLHOOK'
         const rootIndex = lists.rootModelIndex
         var index
         if (command.action === "create") {
-            index = command.parentId > 0 ? companionFindList(rootIndex, command.parentId, "", 0) : rootIndex
+			index = command.parentId > 0 ? companionFindList(rootIndex, command.parentId, "", 0) : currentListModel.sourceParentIndex
             if (!index) throw new Error("parent playlist was not found in Engine")
             lists.createList(index, command.title)
         } else {
@@ -250,7 +256,7 @@ cat >"$qml_hook" <<'QMLHOOK'
         interval: 750
         running: true
         repeat: true
-        onTriggered: root.companionPollNativeCommand()
+        onTriggered: craylists.companionPollNativeCommand()
     }
 
     Timer {
@@ -273,7 +279,7 @@ cat >"$qml_hook" <<'QMLHOOK'
     // END ENGINE COMPANION LIVE PLAYLIST
 QMLHOOK
 awk -v hook="$qml_hook" '
-    /onCreateComponentErrorStringChanged:/ && !inserted {
+    /objectName: "Craylist"/ && !inserted {
         while ((getline line < hook) > 0) print line
         close(hook)
         inserted=1
@@ -283,6 +289,14 @@ awk -v hook="$qml_hook" '
 ' "$qml_clean" >"$qml_stage" || rollback
 chmod 644 "$qml_stage"
 mv "$qml_stage" "$QML_FILE"
+
+awk -v begin="$QML_MARKER_BEGIN" -v end="$QML_MARKER_END" '
+    $0 == begin { skip=1; next }
+    $0 == end { skip=0; next }
+    !skip { print }
+' "$LEGACY_QML_FILE" >"$legacy_qml_clean"
+chmod 644 "$legacy_qml_clean"
+mv "$legacy_qml_clean" "$LEGACY_QML_FILE"
 
 cp "$PERSISTENT_UNIT" "$RUNTIME_UNIT" || rollback
 chmod 644 "$RUNTIME_UNIT"
@@ -314,7 +328,7 @@ mv "$INSTALL_DIR/health.json.new" "$INSTALL_DIR/health.json"
     echo "boot_hook=$BOOT_SCRIPT"
 } >"$INSTALL_DIR/install-state"
 
-rm -f "$PERSISTENT_UNIT.previous" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$qml_before" "$qml_clean" "$qml_hook"
+rm -f "$PERSISTENT_UNIT.previous" "$boot_before" "$runtime_before" "$boot_clean" "$hook_stage" "$qml_before" "$qml_clean" "$qml_hook" "$legacy_qml_before"
 grep -qF "$MARKER_BEGIN" "$BOOT_SCRIPT" || fail "Boot-Hook wurde nicht gespeichert"
 grep -qF "$QML_MARKER_BEGIN" "$QML_FILE" || fail "Live-Playlist-Hook wurde nicht gespeichert"
 systemctl is-active "$SERVICE" >/dev/null || fail "Agent ist nach Healthcheck nicht aktiv"
