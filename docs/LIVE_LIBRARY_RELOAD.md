@@ -22,6 +22,16 @@ aus wie der Bearbeitungsmodus am Prime und bestätigt das Ergebnis an den
 wartenden HTTP-Aufruf der App. Dadurch bleiben Engines Modell, Datenbank und
 Bestätigungsdialoge die maßgebliche Quelle.
 
+## Playlist-Tracing ab Agent v20
+
+Der Diagnosemodus protokolliert QML-Modellereignisse sowie Commits an der
+externen und internen Engine-Datenbank in
+`/data/sc5000-custom/companion/playlist-trace.jsonl`. Beim Start werden außerdem
+alle SQLite-Trigger und der Ausgangszustand von `Playlist` und
+`PlaylistEntity` gespeichert. Während der Aufzeichnung werden Änderungen über
+`PRAGMA data_version` erkannt und mit Vorher-/Nachher-Snapshots sowie dem
+Zustand von Journal-, WAL- und SHM-Dateien festgehalten.
+
 ## Bestätigter Stand
 
 Playlist- und Trackänderungen werden korrekt und dauerhaft in `Database2/m.db`

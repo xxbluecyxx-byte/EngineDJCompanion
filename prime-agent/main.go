@@ -32,8 +32,9 @@ import (
 const (
 	listenAddress = ":8081"
 	tokenPath     = "/data/sc5000-custom/state/access-token"
-	agentVersion  = 19
+	agentVersion  = 20
 	localNotifyAddress = "127.0.0.1:8082"
+	playlistTracePath = "/data/sc5000-custom/companion/playlist-trace.jsonl"
 )
 
 type drive struct {
@@ -60,6 +61,8 @@ type server struct {
 	nativeNext       atomic.Uint64
 	nativePending    *nativeCommand
 	nativeResult     chan nativeResult
+	traceMu          sync.Mutex
+	traceCancel      context.CancelFunc
 }
 
 type nativeCommand struct {
@@ -125,11 +128,15 @@ func main() {
 	mux.HandleFunc("/api/companion/v1/health", s.authorize(s.health))
 	mux.HandleFunc("/api/companion/v1/playlists/schema", s.authorize(s.playlistSchema))
 	mux.HandleFunc("/api/companion/v1/playlists", s.authorize(s.playlists))
+	mux.HandleFunc("/api/companion/v1/diagnostics/playlist-trace/start", s.authorize(s.playlistTraceStart))
+	mux.HandleFunc("/api/companion/v1/diagnostics/playlist-trace/stop", s.authorize(s.playlistTraceStop))
+	mux.HandleFunc("/api/companion/v1/diagnostics/playlist-trace", s.authorize(s.playlistTraceStatus))
 	mux.HandleFunc("/api/companion/v1/tracks/", s.authorize(s.track))
 	localMux := http.NewServeMux()
 	localMux.HandleFunc("/playlist-revision", s.playlistRevisionStatus)
 	localMux.HandleFunc("/native-command", s.nativeCommandStatus)
 	localMux.HandleFunc("/native-command/complete", s.nativeCommandComplete)
+	localMux.HandleFunc("/playlist-trace/event", s.playlistTraceEvent)
 	go func() {
 		log.Printf("Engine Companion local UI notification listening on %s", localNotifyAddress)
 		if err := http.ListenAndServe(localNotifyAddress, localMux); err != nil {
@@ -176,7 +183,7 @@ func (s *server) authorize(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true, "playlistLiveNotify": true, "playlistNativeController": true})
+	writeJSON(w, map[string]any{"service": "engine-companion-agent", "version": agentVersion, "readOnly": false, "metadataWrite": true, "playlistWrite": true, "playlistLiveNotify": true, "playlistNativeController": true, "playlistTrace": true})
 }
 
 func (s *server) playlistRevisionStatus(w http.ResponseWriter, r *http.Request) {
@@ -263,6 +270,120 @@ func (s *server) executeNativePlaylistCommand(ctx context.Context, command *nati
 	case <-timer.C:
 		return errors.New("Engine UI did not acknowledge the command")
 	}
+}
+
+func (s *server) playlistTraceStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	s.traceMu.Lock()
+	if s.traceCancel != nil { s.traceCancel() }
+	ctx, cancel := context.WithCancel(context.Background())
+	s.traceCancel = cancel
+	s.traceMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(playlistTracePath), 0755); err != nil { http.Error(w, err.Error(), http.StatusInternalServerError); return }
+	if err := os.WriteFile(playlistTracePath, nil, 0644); err != nil { http.Error(w, err.Error(), http.StatusInternalServerError); return }
+	s.writePlaylistTrace(map[string]any{"source": "agent", "event": "trace-start", "version": agentVersion})
+	go s.runPlaylistTrace(ctx)
+	writeJSON(w, map[string]any{"active": true, "path": playlistTracePath})
+}
+
+func (s *server) playlistTraceStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	s.traceMu.Lock()
+	if s.traceCancel != nil { s.traceCancel(); s.traceCancel = nil }
+	s.traceMu.Unlock()
+	s.writePlaylistTrace(map[string]any{"source": "agent", "event": "trace-stop"})
+	writeJSON(w, map[string]any{"active": false, "path": playlistTracePath})
+}
+
+func (s *server) playlistTraceStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	s.traceMu.Lock(); active := s.traceCancel != nil; s.traceMu.Unlock()
+	var size int64
+	if info, err := os.Stat(playlistTracePath); err == nil { size = info.Size() }
+	writeJSON(w, map[string]any{"active": active, "path": playlistTracePath, "bytes": size})
+}
+
+func (s *server) playlistTraceEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
+	var event map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil { http.Error(w, "invalid event", http.StatusBadRequest); return }
+	event["source"] = "qml"
+	s.writePlaylistTrace(event)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) writePlaylistTrace(record map[string]any) {
+	record["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+	line, err := json.Marshal(record)
+	if err != nil { return }
+	s.traceMu.Lock()
+	defer s.traceMu.Unlock()
+	file, err := os.OpenFile(playlistTracePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil { return }
+	_, _ = file.Write(append(line, '\n'))
+	_ = file.Close()
+}
+
+type tracedPlaylistDB struct {
+	name string
+	path string
+	db *sql.DB
+	version int64
+	snapshot []byte
+}
+
+func (s *server) runPlaylistTrace(ctx context.Context) {
+	paths := []struct{name, path string}{
+		{"external", "/media/Engine/Engine Library/Database2/m.db"},
+		{"internal", "/data/AppDataUser/AIR Music Technology/Engine/Engine Library/Database2/m.db"},
+	}
+	databases := make([]*tracedPlaylistDB, 0, len(paths))
+	for _, item := range paths {
+		dsn := (&url.URL{Scheme: "file", Path: item.path, RawQuery: "mode=ro&_pragma=busy_timeout(1000)"}).String()
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil { s.writePlaylistTrace(map[string]any{"source":"database","database":item.name,"event":"open-error","error":err.Error()}); continue }
+		db.SetMaxOpenConns(1)
+		traced := &tracedPlaylistDB{name:item.name, path:item.path, db:db}
+		_ = db.QueryRow(`PRAGMA data_version`).Scan(&traced.version)
+		traced.snapshot, _ = playlistDatabaseSnapshot(db)
+		triggers, _ := queryObjects(context.Background(), db, `SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name`)
+		s.writePlaylistTrace(map[string]any{"source":"database","database":item.name,"event":"initial","dataVersion":traced.version,"snapshot":json.RawMessage(traced.snapshot),"triggers":triggers,"journal":playlistJournalState(item.path)})
+		databases = append(databases, traced)
+	}
+	defer func(){ for _, traced := range databases { _ = traced.db.Close() } }()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done(): return
+		case <-ticker.C:
+			for _, traced := range databases {
+				var version int64
+				if err := traced.db.QueryRow(`PRAGMA data_version`).Scan(&version); err != nil || version == traced.version { continue }
+				snapshot, err := playlistDatabaseSnapshot(traced.db)
+				if err != nil { s.writePlaylistTrace(map[string]any{"source":"database","database":traced.name,"event":"snapshot-error","error":err.Error()}); continue }
+				s.writePlaylistTrace(map[string]any{"source":"database","database":traced.name,"event":"commit","previousDataVersion":traced.version,"dataVersion":version,"before":json.RawMessage(traced.snapshot),"after":json.RawMessage(snapshot),"journal":playlistJournalState(traced.path)})
+				traced.version, traced.snapshot = version, snapshot
+			}
+		}
+	}
+}
+
+func playlistDatabaseSnapshot(db *sql.DB) ([]byte, error) {
+	playlists, err := queryObjects(context.Background(), db, `SELECT id,title,parentListId,isPersisted,nextListId,lastEditTime,isExplicitlyExported FROM Playlist ORDER BY id`)
+	if err != nil { return nil, err }
+	entities, err := queryObjects(context.Background(), db, `SELECT id,listId,trackId,databaseUuid,nextEntityId,membershipReference FROM PlaylistEntity ORDER BY id`)
+	if err != nil { return nil, err }
+	return json.Marshal(map[string]any{"playlists":playlists,"entities":entities})
+}
+
+func playlistJournalState(path string) map[string]any {
+	result := map[string]any{}
+	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+		if info, err := os.Stat(path+suffix); err == nil { result[suffix] = map[string]any{"size":info.Size(),"modified":info.ModTime().UTC().Format(time.RFC3339Nano)} }
+	}
+	return result
 }
 
 func (s *server) playlists(w http.ResponseWriter, r *http.Request) {

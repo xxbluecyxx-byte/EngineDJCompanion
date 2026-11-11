@@ -178,6 +178,37 @@ cat >"$qml_hook" <<'QMLHOOK'
     property int companionLastCommand: 0
     property var companionPendingCommand: null
 
+    function companionTrace(event, details) {
+        const request = new XMLHttpRequest()
+        request.open("POST", "http://127.0.0.1:8082/playlist-trace/event", true)
+        request.setRequestHeader("Content-Type", "application/json")
+        request.send(JSON.stringify({event: event, details: details || {}, selectedPath: controller.selectedPath,
+                                     currentParentIndex: String(currentListModel.sourceParentIndex)}))
+    }
+
+    Component.onCompleted: companionTrace("craylist-component-ready", {})
+
+    Connections {
+        target: craylists.model
+        function onRowsAboutToBeInserted(parent, first, last) { companionTrace("rows-about-to-insert", {parent:String(parent), first:first, last:last}) }
+        function onRowsInserted(parent, first, last) { companionTrace("rows-inserted", {parent:String(parent), first:first, last:last}) }
+        function onRowsAboutToBeRemoved(parent, first, last) { companionTrace("rows-about-to-remove", {parent:String(parent), first:first, last:last}) }
+        function onRowsRemoved(parent, first, last) { companionTrace("rows-removed", {parent:String(parent), first:first, last:last}) }
+        function onDataChanged(topLeft, bottomRight, roles) { companionTrace("list-data-changed", {topLeft:String(topLeft), bottomRight:String(bottomRight), roles:String(roles)}) }
+        function onModelAboutToBeReset() { companionTrace("model-about-to-reset", {}) }
+        function onModelReset() { companionTrace("model-reset", {}) }
+    }
+
+    Connections {
+        target: craylists.controller
+        function onListMoved() { companionTrace("controller-list-moved", {}) }
+        function onListRemoved() { companionTrace("controller-list-removed", {}) }
+        function onListRenamed() { companionTrace("controller-list-renamed", {}) }
+        function onTracksAdded(index) { companionTrace("controller-tracks-added", {index:String(index)}) }
+        function onSelectedPathChanged() { companionTrace("controller-selected-path", {path:String(controller.selectedPath)}) }
+        function onListModelChanged() { companionTrace("controller-list-model-changed", {}) }
+    }
+
     function companionRoles(index) {
         try { return Planck.librarianController.craylistController.listModel.getRoles(index) }
         catch (error) { return null }
