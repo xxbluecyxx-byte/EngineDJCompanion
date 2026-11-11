@@ -173,7 +173,7 @@ cat >"$qml_hook" <<'QMLHOOK'
     property var companionPendingCommand: null
 
     function companionRoles(index) {
-        try { return Planck.librarianController.devicesController.selectedDeviceCraylistModel.getRoles(index) }
+        try { return Planck.librarianController.craylistController.listModel.getRoles(index) }
         catch (error) { return null }
     }
 
@@ -187,7 +187,7 @@ cat >"$qml_hook" <<'QMLHOOK'
 
     function companionFindList(parent, uniqueId, title, depth) {
         if (depth > 20) return null
-        const model = Planck.librarianController.devicesController.selectedDeviceCraylistModel
+        const model = Planck.librarianController.craylistController.listModel
         const rows = model.rowCount(parent)
         for (var row = 0; row < rows; ++row) {
             const index = model.index(row, 0, parent)
@@ -212,8 +212,7 @@ cat >"$qml_hook" <<'QMLHOOK'
 
     function companionExecuteCommand(command) {
         const lists = Planck.librarianController.craylistController
-        const devices = Planck.librarianController.devicesController
-        const rootIndex = devices.selectedDeviceCraylistRootModelIndex
+        const rootIndex = lists.rootModelIndex
         var index
         if (command.action === "create") {
             index = command.parentId > 0 ? companionFindList(rootIndex, command.parentId, "", 0) : rootIndex
@@ -261,7 +260,7 @@ cat >"$qml_hook" <<'QMLHOOK'
         onTriggered: {
             if (!companionPendingCommand) return
             const command = companionPendingCommand
-            const rootIndex = Planck.librarianController.devicesController.selectedDeviceCraylistRootModelIndex
+            const rootIndex = Planck.librarianController.craylistController.rootModelIndex
             const byId = command.playlistId > 0 ? companionFindList(rootIndex, command.playlistId, "", 0) : null
             const byTitle = command.title ? companionFindList(rootIndex, 0, command.title, 0) : null
             if (command.action === "create" && byTitle) companionCompleteCommand(true, "")
