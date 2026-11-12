@@ -1,124 +1,140 @@
-# Aktueller Projektstand — 9. November 2026
+# Aktueller Projektstand — 12. November 2026
 
+Dieses Dokument ist die maßgebliche Zusammenfassung des praktisch bestätigten Projektstands. `VALIDATION.md` enthält die ältere Entwicklungshistorie. Aussagen zu Live-Playlist-Änderungen in älteren Dokumenten gelten nur, soweit sie hier bestätigt werden.
 
-## Playlist-Editor 0.18 / Agent v9
+## Ziel und Referenzsystem
 
-Der Agent schreibt Playlists auf Basis des bestätigten Engine-Schemas 3.0.2. Seit Agent v12 verwendet er Engines vorhandene Playlist-Trigger, lokale Track-IDs, die aktuelle Library-UUID und den nativen Import-Read-Counter zur Live-Aktualisierung. `membershipReference` bleibt `0`; vor jeder Änderung läuft das bestehende geprüfte Backup. Die App kann Playlists erstellen, umbenennen und löschen sowie Tracks hinzufügen, entfernen und sortieren.
-Dieses Dokument beschreibt den praktisch bestätigten Stand. Ältere Abschnitte in `VALIDATION.md` bleiben als Entwicklungshistorie erhalten.
+Engine DJ Companion ist eine native Android-App für die Library eines Denon DJ Prime 4+. Ein separater ARMv7-Agent läuft auf dem Gerät und stellt ausschließlich authentifizierte, eng begrenzte Endpunkte bereit. Die Referenzumgebung besteht aus:
 
-## Ausgerollte Versionen
+- Denon DJ Prime 4+ mit EngineX OS und Engine-Library-Schema `3.0.2`;
+- interner SSD-Library unter `/media/Engine/Engine Library/Database2`;
+- ASUS ROG Phone 9 Pro mit der Companion-App;
+- EngineX-Zugriffscode als Bearer-Token;
+- schreibgeschütztem Root-Dateisystem, persistentem `/data` und flüchtigem `/run`.
 
-| Komponente | Stand | Praktisch bestätigt |
+Die Arbeit an Playlists hat Priorität. Trackupload und ein späteres DVS-Experiment folgen erst nach einem stabilen, nativen Playlistpfad.
+
+## Ausgerollter Stand
+
+| Komponente | Stand | Status |
 |---|---:|---|
-| Android-App | `0.16.2-grid-state` · Version Code 31 | Installation als Update, WLAN-Library, Player und Editor |
-| Prime-Agent | API-Version 6 · ARMv7 | Healthcheck, Audio, Analyse und Schreibendpunkte |
-| Prime-Agent-Binary | SHA-256 `ed4f3f4fdbbfd4a08081f7c4675b26330f56a9cffa4c1e4cc8b39a4381a733cb` | Installation vom 9. November 2026 |
-| Engine-Datenbank | Schema 3.0.2 | echte Prime-4+-Library |
+| Prime-Agent | API-Version `23` | installiert und Healthcheck bestätigt |
+| GitHub `main` | `0e5544d` | erfolgreicher Actions-Build |
+| Agent-Artefakt | `EngineCompanion-Prime-agent-armv7` | SHA-256 des ZIP: `3f95ca3bc2042b7d9f5c973b51a5c1912166b69000fa9740017b11ae5cb7ea92` |
+| Agent-Binary v23 | ARMv7, 11.272.352 Byte | SHA-256: `a61c06f4663623c8d185ce5f33479b1181f6026a8a5ad85e74451b89bd81c07a` |
+| Engine-Library | Schema `3.0.2` | 7401 Tracks im Referenz-Snapshot |
 
-Referenzgeräte sind ein Denon DJ Prime 4+ und ein ASUS ROG Phone 9 Pro.
+Der bestätigte v23-Healthcheck meldet `metadataWrite`, `playlistWrite`, `playlistLiveNotify`, `playlistNativeController` und `playlistTrace` als aktiv.
 
-## Bestätigte Funktionen
+## Bestätigte Android- und Agent-Funktionen
 
-### Library und Player
+### Library, Player und Analyse
 
-- Authentifizierte WLAN-Momentaufnahme mit 7401 Tracks; offline in der App verfügbar.
-- Playlist-Baum, Suche, Sortierung, native Reihenfolge und Camelot-Tonarten.
+- Authentifizierter WLAN-Snapshot mit Offline-Kopie auf dem Telefon.
+- Playlist-Baum, Suche, Sortierung, Herkunftsauflösung und native Reihenfolge.
 - HTTP-Range-Audiostream direkt vom Prime.
-- Übersichtswaveform und mitlaufende Detailwaveform mit Drei-Band-Darstellung.
-- Antippen beziehungsweise Ziehen in der Übersicht und Jog-Geste in der Detailwaveform.
-- Beatgrid-, Hot-Cue- und Loop-Markierungen in der Waveform.
+- Übersichtswaveform und mitlaufende Detailwaveform.
+- Lesen und Anzeigen von Hot Cues, gespeicherten Loops und Beatgrid.
+- Camelot-Tonarten, BPM, Rating, Trackfelder und technische Analyseberichte.
 
-### Bearbeitung auf dem Prime
+### Schreiben von Trackdaten
 
-- Trackfelder und Sternebewertungen einzeln oder über eine persistente Warteschlange.
-- Hot Cues setzen, quantisieren, löschen und auf den Prime übertragen.
-- Beatgrid-BPM und Offset bearbeiten und auf den Prime übertragen.
-- Änderungen sind während des laufenden Engine-OS-Betriebs am Prime sichtbar.
-- Cue- und Beatgrid-Schreibvorgänge bewahren unbekannte Felder der bestätigten BLOB-Strukturen.
+- Titel, Interpret, Album, Genre, Kommentar, Label, Remixer und Bewertung.
+- Einzeländerungen und mehrere vorgemerkte Änderungen in einer Warteschlange.
+- Hot Cues setzen, quantisieren und löschen.
+- Beatgrid-BPM und Offset ändern.
+- Änderungen an Metadaten, Rating, Cues und Beatgrid wurden auf dem laufenden Prime praktisch bestätigt.
+- Unbekannte Felder der Cue- und Beatgrid-BLOBs bleiben erhalten.
 
-Gespeicherte Loops werden gelesen und im Player abgespielt. Ein Loop-Editor und Loop-Synchronisierung sind bewusst zurückgestellt.
+Vor einer Schreibsitzung erzeugt der Agent eine konsistente Sicherung mit `VACUUM INTO`, prüft sie mit `integrity_check` und bewahrt höchstens fünf Sicherungen unter `Database2/CompanionBackups` auf.
 
-### Schreibsicherheit
+## Persistenter Agent auf dem Prime
 
-- Der Agent akzeptiert nur feste Endpunkte, numerische Track-IDs und bekannte Felder.
-- Vor der ersten Änderung einer Agent-Sitzung wird `m.db` mit SQLite `VACUUM INTO` gesichert.
-- Die Sicherung muss `integrity_check` bestehen.
-- Eine Sitzung verwendet dieselbe Ausgangssicherung; maximal fünf Sicherungen bleiben erhalten.
-- Sicherungen liegen unter `Engine Library/Database2/CompanionBackups`.
-- Der Android-Editor hält lokale Entwürfe und eine Metadaten-Warteschlange persistent.
+Eine regulär aktivierte Unit unter `/etc/systemd/system` ist wegen des schreibgeschützten Root-Dateisystems nicht möglich. Der Installer verwendet den vorhandenen EngineX-Bootpfad:
 
-## Persistenter Prime-Agent
+1. Binary, Unit und Installationszustand liegen persistent unter `/data/sc5000-custom`.
+2. Ein markierter Block in `bundle/boot-activate.sh` kopiert die Unit beim Boot nach `/run/systemd/system`.
+3. Nach `daemon-reload` wird der Agent asynchron gestartet.
+4. Der Installer prüft Hash, atomaren Austausch und authentifizierten Healthcheck und stellt bei einem Fehler den vorherigen Zustand wieder her.
 
-Der Prime verwendet ein schreibgeschütztes Root-Dateisystem:
+Die Runtime-Unit erscheint deshalb als `disabled`; das ist beabsichtigt. Nach einem Kaltstart kann der Agent wegen der EngineX-Bootreihenfolge erst nach ein bis zwei Minuten aktiv werden.
 
-- `/` und damit `/etc` sind read-only.
-- `/data` ist persistent und beschreibbar.
-- `/run` ist ein flüchtiges tmpfs.
+## Playlist-Schema und bestätigte Datenbankregeln
 
-Darum kann die Unit nicht regulär in `/etc/systemd/system` aktiviert werden. Der Installer verwendet den vorhandenen EngineX-Startweg:
+Die relevanten Tabellen sind `Playlist` und `PlaylistEntity`.
 
-1. Binary und Unit werden unter `/data/sc5000-custom` gespeichert.
-2. Ein klar markierter Block wird vor dem abschließenden Neustart von `engine.service` in `bundle/boot-activate.sh` eingefügt.
-3. Beim Boot kopiert dieser Block die Unit nach `/run/systemd/system`.
-4. Systemd lädt die Unit und startet den Agenten mit `--no-block`.
+- `Playlist` bildet Ordner und Playlists über `parentListId` und eine verkettete Geschwisterreihenfolge über `nextListId` ab.
+- `PlaylistEntity` bildet Trackmitgliedschaften und deren Reihenfolge über `nextEntityId` ab.
+- Die Trackreferenz besteht aus `databaseUuid + trackId` und wird gegen `Track.originDatabaseUuid + Track.originTrackId` aufgelöst.
+- `membershipReference` ist bei den untersuchten Einträgen `0`.
+- Native SQLite-Trigger pflegen Verkettungen, Persistenzfelder und Löschfolgen.
 
-`systemctl` zeigt die dynamische Unit deshalb als `disabled; preset: disabled`. Das ist auf diesem Gerät der erwartete Zustand und bedeutet nicht, dass die Persistenz fehlt.
+## Native Playlist-Untersuchung
 
-Der Start ist asynchron. Unmittelbar nach dem Hochfahren kann die Unit kurz `inactive (dead)` erscheinen. Nach Abschluss der EngineX-Boot-Abhängigkeiten startet sie selbstständig; praktisch wurde eine Verzögerung von ungefähr ein bis zwei Minuten beobachtet.
+### Manuell bestätigter Referenzlauf
 
-### Installation und Update
+Agent v20 protokollierte einen vollständigen manuellen Ablauf im sichtbaren Playlist-Editor des Prime: Playlist erstellen, einen Track hinzufügen und die Playlist wieder löschen.
 
-Das GitHub-Actions-Artefakt `EngineCompanion-Prime-agent-armv7` enthält fünf Dateien. Diese gemeinsam nach `/tmp/engine-companion-agent-install/` kopieren:
+| Schritt | QML-Ereignis | Datenbankwirkung |
+|---|---|---|
+| Erstellen | `rows-inserted` | neue `Playlist`-Zeile, vorheriger Listenknoten zeigt per `nextListId` darauf |
+| Track hinzufügen | `controller-tracks-added` | neue `PlaylistEntity` mit Herkunfts-UUID und Track-ID |
+| Löschen | `controller-list-removed` | Playlist und Entity entfernt, vorherige Kette wieder auf `0` gesetzt |
 
-```sh
-cd /tmp/engine-companion-agent-install
-chmod 755 install-agent.sh uninstall-agent.sh
-./install-agent.sh
-```
+Der Lauf bestätigte, dass der native Prime-Editor direkt in die externe SSD-DB schreibt und seine QML-Modelle gleichzeitig aktualisiert. Beobachtete Trigger waren unter anderem `trigger_before_insert_List`, `trigger_after_insert_List`, `trigger_before_delete_PlaylistEntity` und `trigger_after_delete_List`.
 
-Der Installer prüft SHA-256, tauscht das Binary atomar, sichert den vorherigen Zustand, aktualisiert den Boot-Hook und führt einen authentifizierten Healthcheck aus. Bei einem Fehler werden Boot-Skript, Unit und Binary zurückgesetzt.
+### Erfolgreicher nativer Create-Test
 
-### Prüfung nach einem Neustart
+Agent v21 leitete einen Create-Befehl an die sichtbare `Craylist`-Instanz weiter. Die Playlist `Companion v21 Live Test` erschien ohne Neustart sofort am Prime und wurde dauerhaft als Playlist-ID `115` gespeichert. Entscheidend war, dass nur die sichtbare und aktivierte `Craylist` Befehle abholt; Engine hält mehrere Instanzen dieser Komponente vor.
 
-Nach vollständigem Hochfahren bis zu zwei Minuten warten:
+### Delete-Versuche v22 und v23
 
-```sh
-systemctl status engine-companion-agent --no-pager -l
+v22 brach sicher mit HTTP 409 ab, weil die von QML gemeldeten Modellrollen weder ID noch Titel zuverlässig lieferten. Es wurde nichts gelöscht.
 
-TOKEN=$(cat /data/sc5000-custom/state/access-token)
-curl -sS \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8081/api/companion/v1/health
-```
+v23 berechnet deshalb den sichtbaren Zeilenindex aus der bestätigten `nextListId`-Kette und übergibt `targetRow` an QML. Der Test am 11. November erhielt dennoch keine Bestätigung der Engine-Oberfläche und endete mit HTTP 409: `Engine UI did not acknowledge the command`. Danach wurde ein unerwarteter Neustart des Prime beobachtet. Ursache und zeitlicher Zusammenhang sind noch nicht geklärt.
 
-Bestätigte Antwort:
+## Sicherheitsentscheidung für weitere Playlist-Tests
 
-```json
-{"metadataWrite":true,"readOnly":false,"service":"engine-companion-agent","version":6}
-```
+Bis die Neustartursache geklärt ist, gelten folgende Regeln:
 
-Installationszustand und letzter erfolgreicher Healthcheck:
+1. Vor jedem möglichen Engine- oder Geräteneustart wird der Bediener ausdrücklich informiert.
+2. Vor weiteren Mutationen werden Boot-, Systemd-, Engine-, QML- und Companion-Logs nur lesend gesichert.
+3. Kein `systemctl restart engine.service`, kein physisches Unmount der SSD und keine Medien-Simulation als regulärer Synchronisationspfad.
+4. Native QML-Controller bleiben der bevorzugte Weg, weil derselbe Pfad im manuellen Prime-Editor nachweislich live funktioniert.
+5. Ein HTTP 409 gilt als fehlgeschlagener Vorgang; es wird nicht automatisch auf einen DB-Direktzugriff oder Neustart ausgewichen.
+6. Löschen wird erst weiter getestet, wenn Zielindex, sichtbare Modellinstanz, Bestätigungsdialog, Timeout und Watchdog-Verhalten vollständig protokolliert werden.
 
-```sh
-cat /data/sc5000-custom/companion/install-state
-cat /data/sc5000-custom/companion/health.json
-```
+## Was bei Playlists noch fehlt
 
-### Wiederherstellung und Entfernung
+- Zuverlässiges natives Umbenennen und Löschen ohne Neustart.
+- Tracks nativ hinzufügen, entfernen und neu sortieren.
+- Sofortige Anzeige neuer Tracks in einer bereits geöffneten Playlist.
+- Robuste Bestätigung zwischen Android-App, Agent und sichtbarer QML-Instanz.
+- Konfliktbehandlung, wenn die Ansicht gewechselt oder ein Dialog nicht bestätigt wird.
+- Behebung eines bekannten Randfalls: `targetRow == 0` darf im JSON nicht durch `omitempty` verschwinden.
 
-Das vorherige Binary bleibt als `bundle/bin/engine-companion-agent.previous` erhalten. Der Boot-Hook wird vor der ersten Änderung zusätzlich gesichert.
+## EngineX OS 5.3.0.4
 
-Die Registrierung kann entfernt werden, ohne Zugriffscode, Binary oder Datenbanksicherungen zu löschen:
+Das neue EngineX-Release basiert auf Engine OS 5.3.0+ und bietet für Geräte der zweiten Generation ein aktualisiertes `/data`-Bundle. Es dokumentiert keinen öffentlichen Live-Reload lokaler Playlists. Ein Update wird deshalb nicht als Playlist-Lösung vorausgesetzt und erst nach Prüfung der Auswirkungen auf `boot-activate.sh`, QML-Hooks und Agent-Persistenz vorgenommen.
 
-```sh
-/data/sc5000-custom/companion/uninstall-agent.sh
-```
+Für ein späteres DVS-Experiment sind zwei neue EngineX-Bestandteile interessant: das SC-LIVE-4-AUX-Routing und der optionale MIDI-Controller-Mapper mit einem CDJ-400-Preset für Deck 3/4. Das Prime-4+-System stellt außerdem ein ALSA-Capture-Gerät `pcmC0D0c` bereit. Diese Spur bleibt dokumentiert, wird aber erst nach dem Playlist-Editor bearbeitet.
 
-## Nächste technische Schritte
+## Nächster Arbeitsschritt
 
-1. Langzeittest von Metadaten-, Cue- und Beatgrid-Änderungen über mehrere Engine-Neustarts.
-2. Cue-Namen, Cue-Farben und direkt verschiebbare Cue-Marker.
-3. Sofortige Aktualisierung geänderter Ratings und Metadaten in allen Tracklisten.
-4. Mehrfachauswahl für Tags und Bewertungen.
-5. Später optional Loop-Editor, Playlist-Schreibfunktionen und Konfliktauflösung.
+1. Logs des unerwarteten Neustarts sichern und zwischen Engine-Crash, Watchdog und vollständigem Systemneustart unterscheiden.
+2. v23-Command-, QML- und Systemereignisse zeitlich zusammenführen.
+3. Den Delete-Pfad mit rein lesender Instrumentierung korrigieren.
+4. Erst danach einen angekündigten, beaufsichtigten Test mit der vorhandenen Playlist-ID `115` durchführen.
+5. Nach stabilem CRUD den Trackmitgliedschafts- und Sortierpfad fertigstellen.
+6. Anschließend Playlist-Editor für den Alltag abschließen und Trackupload vom Telefon entwickeln.
 
+## Diagnosepfade
+
+- Playlist-Trace: `/data/sc5000-custom/companion/playlist-trace.jsonl`
+- Installationszustand: `/data/sc5000-custom/companion/install-state`
+- letzter Healthcheck: `/data/sc5000-custom/companion/health.json`
+- EngineX-Bootlog: `/data/sc5000-custom/boot-activate.log`
+- Agent-Binary: `/data/sc5000-custom/bundle/bin/engine-companion-agent`
+- QML-Hook: `/data/sc5000-custom/ui/packs/en/Skins/Embedded/Views/BrowseView/Components/Craylist.qml`
+
+Zugriffstoken, SSH-Schlüssel, Passphrasen und private Sicherungsinhalte gehören nicht in Logs, Issues oder Repository-Dateien.

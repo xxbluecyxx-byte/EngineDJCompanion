@@ -1,5 +1,11 @@
 # Live-Aktualisierung der Engine-Library
 
+> Status vom 12. November 2026: Native Playlist-Erstellung über die sichtbare
+> QML-Instanz ist bestätigt. Native Löschung ist noch nicht stabil. Der letzte
+> v23-Test endete mit HTTP 409 und wurde von einem unerwarteten Prime-Neustart
+> gefolgt. Vor weiteren Mutationen werden zunächst die System- und QML-Logs
+> ausgewertet. Siehe [CURRENT_STATUS.md](CURRENT_STATUS.md).
+
 ## Native Laufzeit-Aktualisierung ab Agent v15
 
 Die Firmware stellt die benötigten Aktualisierungen bereits über ihre
